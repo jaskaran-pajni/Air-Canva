@@ -1,0 +1,115 @@
+import cv2
+import numpy as np
+import mediapipe as mp
+
+
+class AirCanvasEngine:
+    def __init__(self):
+        # --- ROBUST IMPORT ---
+        try:
+            from mediapipe.python.solutions import hands as mp_hands
+            from mediapipe.python.solutions import drawing_utils as mp_draw
+        except ImportError:
+            import mediapipe.solutions.hands as mp_hands
+            import mediapipe.solutions.drawing_utils as mp_draw
+
+        self.mp_hands = mp_hands
+        self.mp_draw = mp_draw
+
+        # FIX 1: Slightly lower confidence keeps tracking even if hand moves fast
+        self.hands = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.5
+        )
+
+        self.canvas = None
+        self.x_prev = 0
+        self.y_prev = 0
+        self.brush_thickness = 10
+        self.draw_color = (0, 0, 255)
+
+    def process_frame(self, frame):
+        events = {
+            "gesture": "None",
+            "cursor_pos": (0, 0),
+            "fingers_up": []
+        }
+
+        frame = cv2.flip(frame, 1)
+        h, w, c = frame.shape
+
+        if self.canvas is None or self.canvas.shape != frame.shape:
+            self.canvas = np.zeros_like(frame)
+
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = self.hands.process(rgb_frame)
+
+        if result.multi_hand_landmarks:
+            for hand_landmarks in result.multi_hand_landmarks:
+                # Draw skeleton (Helpful to see if it's tracking correctly)
+                self.mp_draw.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+
+                lm_list = []
+                for id, lm in enumerate(hand_landmarks.landmark):
+                    cx, cy = int(lm.x * w), int(lm.y * h)
+                    lm_list.append([id, cx, cy])
+
+                if len(lm_list) != 0:
+                    x1, y1 = lm_list[8][1], lm_list[8][2]  # Index Tip
+                    x2, y2 = lm_list[12][1], lm_list[12][2]  # Middle Tip
+
+                    events["cursor_pos"] = (x1, y1)
+
+                    # --- FIX 2: IMPROVED FINGER DETECTION ---
+                    # Index is UP if Tip (8) is above Pip (6)
+                    index_up = lm_list[8][2] < lm_list[6][2]
+
+                    # Middle is UP if Tip (12) is above Pip (10)
+                    middle_up = lm_list[12][2] < lm_list[10][2]
+
+                    events["fingers_up"] = [index_up, middle_up]
+
+                    # --- LOGIC: HOVER (Stop Drawing) ---
+                    # Both fingers must be CLEARLY up
+                    if index_up and middle_up:
+                        events["gesture"] = "Hover"
+                        self.x_prev, self.y_prev = 0, 0
+
+                        # Visual Feedback
+                        cv2.rectangle(frame, (x1, y1 - 25), (x2, y2 + 25), self.draw_color, cv2.FILLED)
+                        cv2.putText(frame, "Hover (Paused)", (x1, y1 - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                    (255, 255, 255), 2)
+
+                    # --- LOGIC: DRAWING ---
+                    # Strict Check: Index UP, but Middle must be DOWN
+                    elif index_up and not middle_up:
+                        events["gesture"] = "Draw"
+                        cv2.circle(frame, (x1, y1), 15, self.draw_color, cv2.FILLED)
+
+                        # Start new line if we just started drawing
+                        if self.x_prev == 0 and self.y_prev == 0:
+                            self.x_prev, self.y_prev = x1, y1
+
+                        # Connect the dots
+                        cv2.line(self.canvas, (self.x_prev, self.y_prev), (x1, y1), self.draw_color,
+                                 self.brush_thickness)
+                        self.x_prev, self.y_prev = x1, y1
+
+                    else:
+                        # Hand closed / Fist
+                        self.x_prev, self.y_prev = 0, 0
+
+        # Combine layers
+        img_gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
+        _, img_inv = cv2.threshold(img_gray, 50, 255, cv2.THRESH_BINARY_INV)
+        img_inv = cv2.cvtColor(img_inv, cv2.COLOR_GRAY2BGR)
+
+        frame = cv2.bitwise_and(frame, img_inv)
+        frame = cv2.bitwise_or(frame, self.canvas)
+
+        return frame, events
+
+    def clear_canvas(self):
+        self.canvas = None
