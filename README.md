@@ -6,7 +6,7 @@ Draw in the air using hand gestures and real-time computer vision
 
 🧩 Problem Statement
 
-Traditional drawing tools require physical contact devices such as a mouse, stylus, or touchscreen. These tools are not always accessible, intuitive, or hygienic, especially in touchless or interactive environments.
+Traditional drawing tools require physical contact devices. These tools may not always be accessible, intuitive, or hygienic.
 
 There is a need for a natural, contactless drawing interface that allows users to interact with a digital canvas using simple hand gestures and real-time motion sensing.
 
@@ -44,31 +44,12 @@ Renders strokes onto a virtual canvas
 
 Motion Detector Engine
 
-Tracks environmental motion
+Tracks  motion
 
 Detects movement regions using frame differencing
 
 Outputs motion events for future integration
 
-Suggested Diagram:
-
-Camera Feed
-     |
-     v
-+------------------+
-| Frame Capture     |
-+------------------+
-     |
-     +--------------------+
-     |                    |
-     v                    v
-AirCanvasEngine     MotionDetectorEngine
-     |                    |
-     v                    v
-Canvas Overlay       Motion Events
-     |
-     v
-Final Output Frame
 
 ⚙️ Installation & Setup
 Prerequisites
@@ -78,12 +59,6 @@ Python 3.8+
 Webcam
 
 Supported OS: Windows / macOS / Linux
-
-Dependencies
-pip install opencv-python mediapipe numpy
-
-Running the Project
-python main.py   # Placeholder entry point
 
 
 Note: A main controller file can be added to combine both engines into a unified pipeline.
@@ -115,10 +90,6 @@ Merge canvas and camera feed into final output
 Touchless drawing or whiteboard systems
 
 Interactive presentations or classrooms
-
-Gesture-based UI prototyping
-
-Smart kiosks or public installations
 
 Computer vision learning projects
 
