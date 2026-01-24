@@ -143,3 +143,15 @@ style
 app.js → All dashboard logic, simulation, and interactions 
 
 app
+
+## Notes (Mac / MediaPipe)
+
+On some macOS machines, the MediaPipe package installs without exposing
+`mp.solutions`. In this case:
+
+- Gesture mode is automatically disabled
+- Motion detection + dashboard still work
+- The system will NOT crash
+
+This is expected behavior on certain Mac builds.
+Gesture mode can be tested on other machines or the Raspberry Pi.
