@@ -1,110 +1,77 @@
-# ConUHacksXMotionDetector
+# ConUHacksXAirMotionCanvas
 
-🎨 AirMotion Canvas
+🎨 Air Motion Canvas
+Gesture-Based Virtual Drawing System | ConUHacks 2026
 
-Draw in the air using hand gestures and real-time computer vision
+Air Motion Canvas turns the air into a digital workspace. By leveraging Edge AI on a low-power Raspberry Pi, we have created a touchless, intuitive interaction model that bridges the gap between human intent and digital creativity.
 
 🧩 Problem Statement
-
-Traditional drawing tools require physical contact devices. These tools may not always be accessible, intuitive, or hygienic.
-
-There is a need for a natural, contactless drawing interface that allows users to interact with a digital canvas using simple hand gestures and real-time motion sensing.
+Traditional digital input devices like mice and tablets are physically restrictive, can cause repetitive strain, and lack the natural feel of free-hand drawing. There is a critical need for Natural Human-Computer Interaction (HCI) that is accessible, hygienic, and works without specialized expensive hardware.
 
 💡 Solution Overview
-
-AirMotion Canvas is a gesture-controlled virtual drawing system that allows users to draw in mid-air using their index finger. The system uses computer vision and hand-tracking to detect gestures and translate them into drawing actions on a digital canvas.
-
-Additionally, a motion detection module monitors environmental movement, enabling future extensions such as gesture-based mode switching, activity detection, or smart interaction triggers.
+Air Motion Canvas is a standalone "Smart Appliance" that uses a standard webcam to track hand movements in 3D space. The system is optimized to run on a 15W ARM processor, performing real-time hand-landmark detection and translating specific gestures into drawing actions on a digital dashboard.
 
 ✨ Key Features
+Edge AI Processing: Real-time hand tracking using MediaPipe optimized for the Raspberry Pi.
 
-Real-time hand tracking using MediaPipe
+Intuitive Gesture States: Seamlessly switch between "Drawing" and "Hovering" using natural hand shapes.
 
-Gesture-based drawing and pause control
+Low-Latency Feedback: Flask-based backend utilizing Server-Sent Events (SSE) for zero-lag visual updates.
 
-Smooth stroke rendering with dynamic tracking
+Environmental Monitoring: Background subtraction-based motion detection for secondary surveillance or mode-triggering.
 
-Motion detection using background subtraction
-
-Modular engine-based architecture
-
-Live visual feedback for gestures and motion
+Mirror Mode: Pre-processed frames ensure a natural "selfie-style" interaction for the user.
 
 🏗️ System Architecture
+The project is built with a modular, engine-based architecture:
 
-The system is divided into two independent processing engines:
+Hardware Foundation: Raspberry Pi (ARM64) serving as the dedicated compute hub.
 
-Air Canvas Engine
+Air Canvas Engine: Handles 3D landmark detection and persistent NumPy-based canvas rendering.
 
-Detects hand landmarks
+Motion Detector Engine: Monitors environment changes using frame differencing.
 
-Identifies gestures (Draw / Hover)
-
-Renders strokes onto a virtual canvas
-
-Motion Detector Engine
-
-Tracks  motion
-
-Detects movement regions using frame differencing
-
-Outputs motion events for future integration
-
-
-⚙️ Installation & Setup
-Prerequisites
-
-Python 3.8+
-
-Webcam
-
-Supported OS: Windows / macOS / Linux
-
-
-Note: A main controller file can be added to combine both engines into a unified pipeline.
+Web Interface: Real-time MJPEG stream and event logging system.
 
 🔄 How It Works (Step-by-Step)
+Capture: Captures frames from the webcam and normalizes resolution to maintain high FPS.
 
-Capture live video frames from the camera
+Analyze: MediaPipe processes the RGB frame to identify 21 hand landmarks.
 
-Flip and preprocess frames for natural interaction
+Classify Gesture:
 
-Detect hand landmarks using MediaPipe
+Index Finger Extended: Triggers "Pen Down" mode (Green cursor).
 
-Identify finger states (index up, middle up/down)
+Closed Fist: Triggers "Hover Mode" (Red cursor) for navigation without drawing.
 
-Map gestures:
+Render: Connects previous and current index coordinates on a persistent canvas layer.
 
-Index up → Draw
+Stream: Blends the canvas with the live feed and streams it to the dashboard via SSE.
 
-Index + Middle up → Hover (pause)
+⚙️ Technical Optimisation
+To ensure high performance on 15W hardware, we implemented:
 
-Draw strokes onto a transparent canvas layer
+Resolution Scaling: Fixed 640×480 processing to reduce CPU load.
 
-Detect motion using background subtraction
+Coordinate Normalization: Ensures gestures are mapped accurately regardless of the user's distance from the camera.
 
-Merge canvas and camera feed into final output
-
-🧪 Example Use Cases
-
-Touchless drawing or whiteboard systems
-
-Interactive presentations or classrooms
-
-Computer vision learning projects
+Vectorised Drawing: Used NumPy-based bitwise addition for fast canvas blending.
 
 📁 Folder Structure
 project-root/
 │
-├── air_canvas.py          # Hand tracking and drawing engine
-├── motion_detector.py     # Motion detection engine
-├── main.py                # (Placeholder) Application entry point
-├── requirements.txt       # Dependencies
+├── gesture_detector.py # Hand tracking and drawing state logic
+├── motion_detector.py  # Background subtraction engine
+├── server.py           # Flask backend & SSE implementation
+├── camera_manager.py   # Camera I/O and frame normalization
+├── app/
+│   ├── templates/      # index.html
+│   └── static/         # style.css & backend-integration.js
 └── README.md
 
 🧠 Challenges & Learnings
 
-Stabilizing hand tracking during fast movement
+Stabilising hand tracking during fast movement
 
 Reducing false positives in motion detection
 
@@ -116,42 +83,47 @@ Building modular, reusable computer vision components
 
 🏁 Conclusion
 
-AirMotion Canvas demonstrates how computer vision can enable natural human-computer interaction without physical contact. By combining hand tracking and motion detection in a modular design, the project lays a strong foundation for future smart interaction systems and real-world applications.
-Clean, modern design using:
+Air Motion Canvas demonstrates how computer vision can bridge the gap between human intent and digital creativity without physical contact. By combining high-precision hand tracking with a modular detection engine, we have laid a strong foundation for the future of Natural Human-Computer Interaction (HCI).
 
-Cards
 
-Icons
+Our system is designed to look advanced and professional for judges, featuring:
 
-Status colors (green = active, red = alert)
+Modular Architecture: Independent engines for gesture and motion allow for high reliability and future scalability.
 
-Designed specifically to look advanced and professional for judges
+Clean, Modern UI: A card-based dashboard utilising professional icons and intuitive status colours (Green for Active/Drawing, Red for Alert/Hover).
 
-All styling organized and reusable via CSS style
-
+Edge Optimization: High-performance software specifically engineered to run efficiently on low-resource hardware like the Raspberry Pi.
 
 8️⃣ Files Delivered
 
-index.html → Dashboard layout and structure 
+server.py: The Flask-based backend serving as the central hub for video streaming and SSE event handling.
 
-index
+gesture_detector.py: The core state machine managing the transition between Index-Drawing and Fist-Hovering.
 
-style.css → Complete UI styling and animations 
+motion_detector.py: A background-subtraction engine for real-time environmental monitoring.
 
-style
+index.html: The dashboard structure provides a real-time MJPEG feed and activity logs.
 
-app.js → All dashboard logic, simulation, and interactions 
+style.css: Complete UI styling including animations, card layouts, and responsive design elements.
 
-app
+backend-integration.js: Frontend logic for SSE connection, mode switching, and canvas clearing.
 
-## Notes (Mac / MediaPipe)
+⚠️ Notes (Mac / MediaPipe)
 
-On some macOS machines, the MediaPipe package installs without exposing
-`mp.solutions`. In this case:
+On some macOS environments, the mediapipe package may install without exposing mp.solutions. We have engineered a robust fail-safe for this scenario :
 
-- Gesture mode is automatically disabled
-- Motion detection + dashboard still work
-- The system will NOT crash
+Graceful Degradation: Gesture mode is automatically disabled to prevent system crashes.
 
-This is expected behavior on certain Mac builds.
-Gesture mode can be tested on other machines or the Raspberry Pi.
+System Stability: The Motion Detection engine and dashboard remain fully functional.
+
+Target Hardware: Full gesture capabilities are optimised for and best tested on the Raspberry Pi or standard Windows/Linux builds.
+
+👥 The Team
+
+Ayaan Vashistha: Systems Lead & Integration Architect.
+
+Jaskaran: Frontend Developer & Dashboard Integration.
+
+Zohair: Computer Vision Engineer (Gesture & Motion Logic).
+
+Pawan: Repository Lead & Presentation Strategist.
