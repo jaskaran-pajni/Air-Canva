@@ -1,23 +1,28 @@
+import os
 from dataclasses import dataclass
 
 @dataclass
 class Config:
-    # Camera
+    # --- Camera ---
+    # Set to 1 for MacBook FaceTime camera, 0 for external Logitech
     camera_index: int = 0
-    width: int = 640
-    height: int = 360
+    width: int = 1920
+    height: int = 1080
     fps_limit: int = 15
 
-    # Default mode: "motion" or "gesture"
+    # --- Default Mode ---
+    # "motion" or "gesture"
     default_mode: str = "motion"
 
-    # Storage
-    log_path: str = "logs/events.jsonl"
+    # --- Storage ---
+    # Ensure these paths match your folder structure exactly
+    log_path: str = os.path.join("logs", "events.jsonl")
     snapshot_dir: str = "snapshots"
     max_events_in_memory: int = 200
 
-    # Server
-    host: str = "0.0.0.0"
-    port: int = 5000
+    # --- Server ---
+    # 0.0.0.0 allows access from other devices on your Wi-Fi
+    host: str = "0.0.0.0" 
+    port: int = 5050
 
 CFG = Config()

@@ -1,179 +1,141 @@
 // ===================================
-// BACKEND INTEGRATION MODULE
+// BACKEND INTEGRATION MODULE (FINAL)
 // ===================================
 
-// Configuration
 const CONFIG = {
-    BACKEND_URL: 'http://localhost:5000', // Change this to your Pi's address
-    SSE_ENDPOINT: '/events',
-    COMMAND_ENDPOINT: '/command',
-    RECONNECT_DELAY: 3000
+  BACKEND_URL: window.location.origin,   // auto matches current host:port
+  SSE_ENDPOINT: "/events",
+  VIDEO_ENDPOINT: "/video_feed",
+  RECONNECT_DELAY: 3000,
 };
 
 // State Management
 const state = {
-    // Mode
-    isLiveMode: false,
-    backendStatus: 'disconnected',
-    eventSource: null,
-    
-    // Monitor state
-    isMonitoring: true,
-    soundEnabled: true,
-    sensitivity: 30,
-    
-    // Event state
-    eventCount: 0,
-    currentStatus: 'No Motion',
-    motionActive: false,
-    events: [],
-    
-    // Timing
-    startTime: Date.now(),
-    
-    // Canvas
-    canvas: null,
-    ctx: null
+  isLiveMode: false,
+  backendStatus: "disconnected",
+  eventSource: null,
+
+  // Monitor (local UI only for now)
+  isMonitoring: true,
+  soundEnabled: true,
+  sensitivity: 30,
+
+  // Events/UI
+  eventCount: 0,
+  currentStatus: "No Motion",
+  motionActive: false,
+  events: [],
+
+  // Timing
+  startTime: Date.now(),
+
+  // Canvas
+  canvas: null,
+  ctx: null,
 };
 
 // ===================================
-// BACKEND COMMUNICATION
+// BACKEND COMMUNICATION (SSE)
 // ===================================
 
 function connectToBackend() {
-    if (!state.isLiveMode) return;
-    
-    // Close existing connection
-    if (state.eventSource) {
-        state.eventSource.close();
+  if (!state.isLiveMode) return;
+
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+
+  updateBackendStatus("connecting");
+
+  const url = `${CONFIG.BACKEND_URL}${CONFIG.SSE_ENDPOINT}`;
+  console.log("Connecting to backend SSE:", url);
+
+  state.eventSource = new EventSource(url);
+
+  state.eventSource.onopen = () => {
+    console.log("Backend connected (SSE open)");
+    updateBackendStatus("connected");
+  };
+
+  // Your server emits default "message" events:  data: {...}\n\n
+  state.eventSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      handleBackendEvent(data);
+      updateBackendStatus("connected");
+    } catch (err) {
+      console.error("Failed to parse SSE JSON:", err, e.data);
     }
-    
-    console.log('Connecting to backend SSE...');
-    updateBackendStatus('connecting');
-    
-    const url = `${CONFIG.BACKEND_URL}${CONFIG.SSE_ENDPOINT}`;
-    state.eventSource = new EventSource(url);
-    
-    state.eventSource.onopen = () => {
-        console.log('Backend connected');
-        updateBackendStatus('connected');
-    };
-    
-    state.eventSource.onerror = (error) => {
-        console.error('SSE connection error:', error);
-        updateBackendStatus('error');
-        
-        // Attempt reconnection
-        if (state.isLiveMode) {
-            setTimeout(() => {
-                if (state.isLiveMode) {
-                    connectToBackend();
-                }
-            }, CONFIG.RECONNECT_DELAY);
-        }
-    };
-    
-    // Listen for motion events
-    state.eventSource.addEventListener('motion', (e) => {
-        try {
-            const data = JSON.parse(e.data);
-            handleBackendMotionEvent(data);
-        } catch (err) {
-            console.error('Failed to parse motion event:', err);
-        }
-    });
-    
-    // Listen for status updates
-    state.eventSource.addEventListener('status', (e) => {
-        try {
-            const data = JSON.parse(e.data);
-            handleBackendStatusUpdate(data);
-        } catch (err) {
-            console.error('Failed to parse status event:', err);
-        }
-    });
+  };
+
+  state.eventSource.onerror = (error) => {
+    console.error("SSE connection error:", error);
+    updateBackendStatus("error");
+
+    if (state.isLiveMode) {
+      setTimeout(() => {
+        if (state.isLiveMode) connectToBackend();
+      }, CONFIG.RECONNECT_DELAY);
+    }
+  };
 }
 
 function disconnectFromBackend() {
-    if (state.eventSource) {
-        state.eventSource.close();
-        state.eventSource = null;
-    }
-    updateBackendStatus('disconnected');
-}
-
-async function sendBackendCommand(command, params = {}) {
-    if (!state.isLiveMode) return;
-    
-    try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}${CONFIG.COMMAND_ENDPOINT}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                command,
-                ...params
-            })
-        });
-        
-        if (!response.ok) {
-            console.error('Backend command failed:', response.statusText);
-        }
-        
-        const result = await response.json();
-        console.log('Command response:', result);
-        return result;
-        
-    } catch (error) {
-        console.error('Failed to send command to backend:', error);
-        updateBackendStatus('error');
-    }
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+  updateBackendStatus("disconnected");
 }
 
 // ===================================
-// BACKEND EVENT HANDLERS
+// BACKEND EVENT HANDLING
 // ===================================
 
-function handleBackendMotionEvent(data) {
+function handleBackendEvent(data) {
+  if (!data || typeof data !== "object") return;
+
+  // Motion events from your MotionDetector
+  if (data.type === "motion") {
     if (!state.isMonitoring) return;
-    
-    console.log('Motion event received:', data);
-    
-    if (data.type === 'started') {
-        state.motionActive = true;
-        state.currentStatus = 'Motion Detected';
-        state.eventCount++;
-        
-        updateUI();
-        addLogEntry('Motion Started', 'started', data.confidence || '');
-        
-    } else if (data.type === 'ended') {
-        state.motionActive = false;
-        state.currentStatus = 'No Motion';
-        
-        updateUI();
-        addLogEntry('Motion Ended', 'ended', data.duration || '');
-    }
-}
 
-function handleBackendStatusUpdate(data) {
-    console.log('Status update received:', data);
-    
-    if (data.monitoring !== undefined) {
-        state.isMonitoring = data.monitoring;
-    }
-    if (data.eventCount !== undefined) {
-        state.eventCount = data.eventCount;
-    }
-    if (data.sensitivity !== undefined) {
-        state.sensitivity = data.sensitivity;
-    }
-    if (data.sound !== undefined) {
-        state.soundEnabled = data.sound;
-    }
-    
+    state.motionActive = true;
+    state.currentStatus = "Motion Detected";
+    state.eventCount++;
+
     updateUI();
+    addLogEntry("Motion Detected", "started", data.confidence ?? "");
+
+    // Auto-clear after short delay so UI doesn't stick forever
+    setTimeout(() => {
+      state.motionActive = false;
+      state.currentStatus = state.isMonitoring ? "No Motion" : "Monitoring Paused";
+      updateUI();
+    }, 900);
+
+    return;
+  }
+
+  // Optional: gesture events
+  if (data.type === "gesture") {
+    if (!state.isMonitoring) return;
+
+    state.motionActive = true;
+    state.currentStatus = "Gesture Detected";
+    state.eventCount++;
+
+    updateUI();
+    addLogEntry("Gesture Detected", "started", data.meta?.status ?? "");
+
+    setTimeout(() => {
+      state.motionActive = false;
+      state.currentStatus = state.isMonitoring ? "No Motion" : "Monitoring Paused";
+      updateUI();
+    }, 900);
+
+    return;
+  }
 }
 
 // ===================================
@@ -181,104 +143,106 @@ function handleBackendStatusUpdate(data) {
 // ===================================
 
 function switchMode(mode) {
-    const isLive = mode === 'live';
-    
-    // Update state
-    state.isLiveMode = isLive;
-    
-    // Update UI
-    const demoBtn = document.getElementById('demoModeBtn');
-    const liveBtn = document.getElementById('liveModeBtn');
-    const backendStatus = document.getElementById('backendStatus');
-    const demoControls = document.getElementById('demoControls');
-    
-    if (isLive) {
-        demoBtn.classList.remove('active');
-        liveBtn.classList.add('active');
-        backendStatus.style.display = 'flex';
-        demoControls.classList.remove('visible');
-        
-        // Connect to backend
-        connectToBackend();
-    } else {
-        demoBtn.classList.add('active');
-        liveBtn.classList.remove('active');
-        backendStatus.style.display = 'none';
-        demoControls.classList.add('visible');
-        
-        // Disconnect from backend
-        disconnectFromBackend();
+  const isLive = mode === "live";
+  state.isLiveMode = isLive;
+
+  const demoBtn = document.getElementById("demoModeBtn");
+  const liveBtn = document.getElementById("liveModeBtn");
+  const backendStatus = document.getElementById("backendStatus");
+  const demoControls = document.getElementById("demoControls");
+
+  const canvas = document.getElementById("videoCanvas");
+  const img = document.getElementById("videoImg");
+
+  if (isLive) {
+    demoBtn?.classList.remove("active");
+    liveBtn?.classList.add("active");
+    if (backendStatus) backendStatus.style.display = "flex";
+    demoControls?.classList.remove("visible");
+
+    // Hide demo canvas
+    if (canvas) canvas.style.display = "none";
+
+    // Show MJPEG stream
+    if (img) {
+      img.style.display = "block";
+
+      // Force refresh even if browser caches/sticks
+      const base = `${CONFIG.BACKEND_URL}${CONFIG.VIDEO_ENDPOINT}`;
+      img.src = `${base}?t=${Date.now()}`;
     }
+
+    connectToBackend();
+  } else {
+    demoBtn?.classList.add("active");
+    liveBtn?.classList.remove("active");
+    if (backendStatus) backendStatus.style.display = "none";
+    demoControls?.classList.add("visible");
+
+    // Stop MJPEG
+    if (img) {
+      img.src = "";
+      img.style.display = "none";
+    }
+
+    // Show demo canvas
+    if (canvas) canvas.style.display = "block";
+
+    disconnectFromBackend();
+  }
 }
 
 function updateBackendStatus(status) {
-    state.backendStatus = status;
-    
-    const dot = document.getElementById('backendStatusDot');
-    const text = document.getElementById('backendStatusText');
-    
-    dot.className = 'backend-status-dot';
-    
-    switch(status) {
-        case 'connected':
-            dot.classList.add('connected');
-            text.textContent = 'Connected';
-            break;
-        case 'connecting':
-            text.textContent = 'Connecting...';
-            break;
-        case 'error':
-            dot.classList.add('error');
-            text.textContent = 'Error';
-            break;
-        default:
-            text.textContent = 'Disconnected';
-    }
+  state.backendStatus = status;
+
+  const dot = document.getElementById("backendStatusDot");
+  const text = document.getElementById("backendStatusText");
+  if (!dot || !text) return;
+
+  dot.className = "backend-status-dot";
+
+  switch (status) {
+    case "connected":
+      dot.classList.add("connected");
+      text.textContent = "Connected";
+      break;
+    case "connecting":
+      text.textContent = "Connecting...";
+      break;
+    case "error":
+      dot.classList.add("error");
+      text.textContent = "Error";
+      break;
+    default:
+      text.textContent = "Disconnected";
+  }
 }
 
 // ===================================
-// CONTROL FUNCTIONS
+// CONTROL FUNCTIONS (LOCAL UI ONLY)
 // ===================================
 
 async function toggleMonitoring() {
-    state.isMonitoring = !state.isMonitoring;
-    
-    // Send to backend if in live mode
-    if (state.isLiveMode) {
-        await sendBackendCommand('monitoring', { enabled: state.isMonitoring });
-    }
-    
-    // Update local state
-    if (!state.isMonitoring) {
-        state.motionActive = false;
-        state.currentStatus = 'Monitoring Paused';
-    } else {
-        state.currentStatus = 'No Motion';
-    }
-    
-    updateUI();
+  state.isMonitoring = !state.isMonitoring;
+
+  if (!state.isMonitoring) {
+    state.motionActive = false;
+    state.currentStatus = "Monitoring Paused";
+  } else {
+    state.currentStatus = "No Motion";
+  }
+
+  updateUI();
 }
 
 async function updateSensitivity(value) {
-    state.sensitivity = parseInt(value);
-    
-    // Send to backend if in live mode
-    if (state.isLiveMode) {
-        await sendBackendCommand('sensitivity', { value: state.sensitivity });
-    }
-    
-    updateUI();
+  state.sensitivity = parseInt(value, 10);
+  updateUI();
 }
 
 async function toggleSound() {
-    state.soundEnabled = !state.soundEnabled;
-    
-    // Send to backend if in live mode
-    if (state.isLiveMode) {
-        await sendBackendCommand('sound', { enabled: state.soundEnabled });
-    }
-    
-    updateUI();
+  state.soundEnabled = !state.soundEnabled;
+  updateUI();
 }
 
 // ===================================
@@ -286,111 +250,106 @@ async function toggleSound() {
 // ===================================
 
 function triggerMotion() {
-    if (state.isLiveMode) {
-        alert('Switch to Demo Mode to use demo controls');
-        return;
-    }
-    
-    if (!state.isMonitoring) {
-        alert('Monitoring is paused! Start monitoring first.');
-        return;
-    }
+  if (state.isLiveMode) {
+    alert("Switch to Demo Mode to use demo controls");
+    return;
+  }
 
-    state.motionActive = true;
-    state.currentStatus = 'Motion Detected';
-    state.eventCount++;
+  if (!state.isMonitoring) {
+    alert("Monitoring is paused! Start monitoring first.");
+    return;
+  }
 
+  state.motionActive = true;
+  state.currentStatus = "Motion Detected";
+  state.eventCount++;
+
+  updateUI();
+  addLogEntry("Motion Started", "started");
+
+  setTimeout(() => {
+    state.motionActive = false;
+    state.currentStatus = "No Motion";
     updateUI();
-    addLogEntry('Motion Started', 'started');
-
-    setTimeout(() => {
-        state.motionActive = false;
-        state.currentStatus = 'No Motion';
-        updateUI();
-        addLogEntry('Motion Ended', 'ended', '2.0s');
-    }, 2000);
+    addLogEntry("Motion Ended", "ended", "2.0s");
+  }, 2000);
 }
 
 function autoMode() {
-    if (state.isLiveMode) {
-        alert('Switch to Demo Mode to use demo controls');
-        return;
+  if (state.isLiveMode) {
+    alert("Switch to Demo Mode to use demo controls");
+    return;
+  }
+
+  if (!state.isMonitoring) {
+    alert("Please start monitoring first!");
+    return;
+  }
+
+  let count = 0;
+  const interval = setInterval(() => {
+    if (count >= 5) {
+      clearInterval(interval);
+      return;
     }
-    
-    if (!state.isMonitoring) {
-        alert('Please start monitoring first!');
-        return;
-    }
-    
-    let count = 0;
-    const interval = setInterval(() => {
-        if (count >= 5) {
-            clearInterval(interval);
-            return;
-        }
-        triggerMotion();
-        count++;
-    }, 4000);
+    triggerMotion();
+    count++;
+  }, 4000);
 }
 
 function clearLogs() {
-    state.events = [];
-    updateUI();
+  state.events = [];
+  updateUI();
 }
 
 function clearAll() {
-    if (!confirm('Clear all events and reset counters?')) return;
-    
-    state.eventCount = 0;
-    state.events = [];
-    updateUI();
+  if (!confirm("Clear all events and reset counters?")) return;
+
+  state.eventCount = 0;
+  state.events = [];
+  updateUI();
 }
 
 // ===================================
 // LOG MANAGEMENT
 // ===================================
 
-function addLogEntry(text, type, duration = '') {
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString();
-    const relativeTime = 'a few seconds ago';
+function addLogEntry(text, type, duration = "") {
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString();
+  const relativeTime = "a few seconds ago";
 
-    const entry = {
-        text,
-        type,
-        duration,
-        time: timeStr,
-        relativeTime
-    };
+  const entry = { text, type, duration, time: timeStr, relativeTime };
 
-    state.events.unshift(entry);
-    
-    // Keep only last 20 events
-    if (state.events.length > 20) {
-        state.events = state.events.slice(0, 20);
-    }
+  state.events.unshift(entry);
+  if (state.events.length > 20) state.events = state.events.slice(0, 20);
 
-    updateLogUI();
+  updateLogUI();
 }
 
 function updateLogUI() {
-    const logContainer = document.getElementById('logContainer');
-    
-    if (state.events.length === 0) {
-        logContainer.innerHTML = '<div class="log-empty">No recent events</div>';
-        return;
-    }
-    
-    logContainer.innerHTML = state.events.map(entry => `
+  const logContainer = document.getElementById("logContainer");
+  if (!logContainer) return;
+
+  if (state.events.length === 0) {
+    logContainer.innerHTML = '<div class="log-empty">No recent events</div>';
+    return;
+  }
+
+  logContainer.innerHTML = state.events
+    .map(
+      (entry) => `
         <div class="log-entry">
-            <div class="log-entry-header">
-                <div class="log-status-dot ${entry.type}"></div>
-                <div class="log-event-type">${entry.text}</div>
-                ${entry.duration ? `<div class="log-duration">${entry.duration}</div>` : ''}
-            </div>
-            <div class="log-timestamp">${entry.time} · ${entry.relativeTime}</div>
+          <div class="log-entry-header">
+            <div class="log-status-dot ${entry.type}"></div>
+            <div class="log-event-type">${entry.text}</div>
+            ${entry.duration ? `<div class="log-duration">${entry.duration}</div>` : ""}
+          </div>
+          <div class="log-timestamp">${entry.time} · ${entry.relativeTime}</div>
         </div>
-    `).join('');
+      `
+    )
+    .join("");
 }
 
 // ===================================
@@ -398,121 +357,99 @@ function updateLogUI() {
 // ===================================
 
 function updateUI() {
-    // Update monitoring button
-    const monitoringButton = document.getElementById('monitoringButton');
-    const buttonText = document.getElementById('monitoringText');
-    const buttonIcon = document.getElementById('buttonIcon');
-    const systemStatus = document.getElementById('systemStatus');
-    const headerStatus = document.getElementById('headerStatus');
-    
-    if (state.isMonitoring) {
-        monitoringButton.classList.add('monitoring-active');
-        buttonText.textContent = 'Stop Monitoring';
-        buttonIcon.textContent = '■';
-        systemStatus.textContent = 'Monitoring Active';
-        headerStatus.classList.remove('paused');
-    } else {
-        monitoringButton.classList.remove('monitoring-active');
-        buttonText.textContent = 'Start Monitoring';
-        buttonIcon.textContent = '▶';
-        systemStatus.textContent = 'Monitoring Paused';
-        headerStatus.classList.add('paused');
-    }
-    
-    // Update REC indicator
-    const recIndicator = document.getElementById('recIndicator');
-    if (state.isMonitoring) {
-        recIndicator.classList.add('recording');
-    } else {
-        recIndicator.classList.remove('recording');
-    }
-    
-    // Update motion badge
-    const motionBadge = document.getElementById('motionBadge');
-    if (state.motionActive) {
-        motionBadge.classList.add('active');
-    } else {
-        motionBadge.classList.remove('active');
-    }
-    
-    // Update status cards
-    document.getElementById('currentStatus').textContent = state.currentStatus;
-    document.getElementById('eventCount').textContent = state.eventCount;
-    
-    // Update sensitivity
-    document.getElementById('sensitivityValue').textContent = state.sensitivity + '%';
-    document.getElementById('sensitivitySlider').value = state.sensitivity;
-    
-    // Update sound toggle
-    const soundToggle = document.getElementById('soundToggle');
-    if (state.soundEnabled) {
-        soundToggle.classList.add('active');
-    } else {
-        soundToggle.classList.remove('active');
-    }
+  const monitoringButton = document.getElementById("monitoringButton");
+  const buttonText = document.getElementById("monitoringText");
+  const buttonIcon = document.getElementById("buttonIcon");
+  const systemStatus = document.getElementById("systemStatus");
+  const headerStatus = document.getElementById("headerStatus");
+
+  if (state.isMonitoring) {
+    monitoringButton?.classList.add("monitoring-active");
+    if (buttonText) buttonText.textContent = "Stop Monitoring";
+    if (buttonIcon) buttonIcon.textContent = "■";
+    if (systemStatus) systemStatus.textContent = "Monitoring Active";
+    headerStatus?.classList.remove("paused");
+  } else {
+    monitoringButton?.classList.remove("monitoring-active");
+    if (buttonText) buttonText.textContent = "Start Monitoring";
+    if (buttonIcon) buttonIcon.textContent = "▶";
+    if (systemStatus) systemStatus.textContent = "Monitoring Paused";
+    headerStatus?.classList.add("paused");
+  }
+
+  const recIndicator = document.getElementById("recIndicator");
+  if (state.isMonitoring) recIndicator?.classList.add("recording");
+  else recIndicator?.classList.remove("recording");
+
+  const motionBadge = document.getElementById("motionBadge");
+  if (state.motionActive) motionBadge?.classList.add("active");
+  else motionBadge?.classList.remove("active");
+
+  const currentStatusEl = document.getElementById("currentStatus");
+  const eventCountEl = document.getElementById("eventCount");
+  if (currentStatusEl) currentStatusEl.textContent = state.currentStatus;
+  if (eventCountEl) eventCountEl.textContent = state.eventCount;
+
+  const sensVal = document.getElementById("sensitivityValue");
+  const sensSlider = document.getElementById("sensitivitySlider");
+  if (sensVal) sensVal.textContent = state.sensitivity + "%";
+  if (sensSlider) sensSlider.value = state.sensitivity;
+
+  const soundToggle = document.getElementById("soundToggle");
+  if (state.soundEnabled) soundToggle?.classList.add("active");
+  else soundToggle?.classList.remove("active");
+
+  updateLogUI();
 }
 
 // ===================================
-// VIDEO FEED RENDERING
+// VIDEO FEED RENDERING (DEMO CANVAS)
 // ===================================
 
 function drawVideoFeed() {
-    const gradient = state.ctx.createLinearGradient(0, 0, state.canvas.width, state.canvas.height);
-    gradient.addColorStop(0, '#2a3f5f');
-    gradient.addColorStop(1, '#1a2332');
-    state.ctx.fillStyle = gradient;
-    state.ctx.fillRect(0, 0, state.canvas.width, state.canvas.height);
+  if (state.isLiveMode) return;
+  if (!state.ctx || !state.canvas) return;
 
-    // Room elements
-    state.ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-    state.ctx.fillRect(100, 500, 300, 200);
-    state.ctx.fillRect(900, 400, 250, 300);
+  const gradient = state.ctx.createLinearGradient(0, 0, state.canvas.width, state.canvas.height);
+  gradient.addColorStop(0, "#2a3f5f");
+  gradient.addColorStop(1, "#1a2332");
+  state.ctx.fillStyle = gradient;
+  state.ctx.fillRect(0, 0, state.canvas.width, state.canvas.height);
 
-    // Motion detection overlay
-    if (state.motionActive) {
-        state.ctx.strokeStyle = '#10b981';
-        state.ctx.lineWidth = 4;
-        const boxX = 400 + Math.random() * 200;
-        const boxY = 250 + Math.random() * 100;
-        state.ctx.strokeRect(boxX, boxY, 300, 250);
-        
-        const bracketSize = 20;
-        state.ctx.lineWidth = 3;
-        
-        state.ctx.beginPath();
-        state.ctx.moveTo(boxX, boxY + bracketSize);
-        state.ctx.lineTo(boxX, boxY);
-        state.ctx.lineTo(boxX + bracketSize, boxY);
-        state.ctx.stroke();
-        
-        state.ctx.beginPath();
-        state.ctx.moveTo(boxX + 300 - bracketSize, boxY);
-        state.ctx.lineTo(boxX + 300, boxY);
-        state.ctx.lineTo(boxX + 300, boxY + bracketSize);
-        state.ctx.stroke();
-    }
+  state.ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+  state.ctx.fillRect(100, 500, 300, 200);
+  state.ctx.fillRect(900, 400, 250, 300);
 
-    // Ambient noise
-    for (let i = 0; i < 50; i++) {
-        state.ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.02})`;
-        state.ctx.fillRect(Math.random() * state.canvas.width, Math.random() * state.canvas.height, 2, 2);
-    }
+  if (state.motionActive) {
+    state.ctx.strokeStyle = "#10b981";
+    state.ctx.lineWidth = 4;
+    const boxX = 400 + Math.random() * 200;
+    const boxY = 250 + Math.random() * 100;
+    state.ctx.strokeRect(boxX, boxY, 300, 250);
+  }
+
+  for (let i = 0; i < 50; i++) {
+    state.ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.02})`;
+    state.ctx.fillRect(Math.random() * state.canvas.width, Math.random() * state.canvas.height, 2, 2);
+  }
 }
 
 function updateTimestamp() {
-    const now = new Date();
-    const hours = now.getHours() % 12 || 12;
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
-    document.getElementById('videoTimestamp').textContent = `${hours}:${minutes}:${seconds} ${ampm}`;
+  const now = new Date();
+  const hours = now.getHours() % 12 || 12;
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+  const ampm = now.getHours() >= 12 ? "PM" : "AM";
+  const ts = document.getElementById("videoTimestamp");
+  if (ts) ts.textContent = `${hours}:${minutes}:${seconds} ${ampm}`;
 }
 
 function updateUptime() {
-    const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
-    const minutes = Math.floor(elapsed / 60);
-    const seconds = elapsed % 60;
-    document.getElementById('uptime').textContent = `${minutes}:${String(seconds).padStart(2, '0')}`;
+  const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const up = document.getElementById("uptime");
+  if (up) up.textContent = `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 // ===================================
@@ -520,30 +457,28 @@ function updateUptime() {
 // ===================================
 
 function init() {
-    // Initialize canvas
-    state.canvas = document.getElementById('videoCanvas');
-    state.ctx = state.canvas.getContext('2d');
+  state.canvas = document.getElementById("videoCanvas");
+  if (state.canvas) {
+    state.ctx = state.canvas.getContext("2d");
     state.canvas.width = 1280;
     state.canvas.height = 720;
-    
-    // Set initial mode to demo
-    document.getElementById('demoModeBtn').classList.add('active');
-    
-    // Start timers
-    setInterval(updateTimestamp, 1000);
-    setInterval(updateUptime, 1000);
-    setInterval(drawVideoFeed, 100);
-    
-    // Initial UI update
-    updateUI();
-    
-    console.log('Motion Monitor initialized in Demo mode');
-    console.log('Backend URL:', CONFIG.BACKEND_URL);
+  }
+
+  // Default to Demo mode
+  document.getElementById("demoModeBtn")?.classList.add("active");
+
+  setInterval(updateTimestamp, 1000);
+  setInterval(updateUptime, 1000);
+  setInterval(drawVideoFeed, 100);
+
+  updateUI();
+
+  console.log("Motion Monitor initialized in Demo mode");
+  console.log("Backend URL:", CONFIG.BACKEND_URL);
 }
 
-// Start when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
 } else {
-    init();
+  init();
 }
