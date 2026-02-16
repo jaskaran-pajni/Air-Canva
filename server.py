@@ -80,12 +80,21 @@ def index():
 
 @app.route("/health")
 def health():
+    """Health check endpoint with detailed info"""
+    current_time = time.time()
     return jsonify({
-        "ok": True, 
-        "status": "healthy", 
-        "timestamp": time.time(),
-        "port": CFG.port
+        "ok": True,
+        "status": "healthy",
+        "timestamp": current_time,
+        "port": CFG.port,
+        "is_render": IS_RENDER,
+        "service": "air-motion-canvas"
     })
+    
+@app.route("/healthz")
+def healthz():
+    """Super simple health check for Render's port scanner"""
+    return "OK", 200, {'Content-Type': 'text/plain'}    
     
 @app.route("/debug/routes")
 def list_routes():
