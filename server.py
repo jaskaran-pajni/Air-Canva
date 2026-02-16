@@ -5,6 +5,7 @@ import json
 import time
 import sys
 import traceback
+import builtins  # Add this
 from flask_cors import CORS
 from flask import Flask, Response, jsonify, request, stream_with_context
 from config import CFG
@@ -13,17 +14,16 @@ from event_store import EventStore
 from actions import Actions
 from pipeline import Pipeline
 
-# Force print to flush immediately
-print = lambda *args, **kwargs: __builtins__.print(*args, **kwargs, flush=True)
 
-print("🚀 Starting server.py...")
-print(f"Python version: {sys.version}")
-print(f"Current directory: {os.getcwd()}")
-print(f"Files in directory: {os.listdir('.')}")
+
+print("🚀 Starting server.py...", flush=True)
+print(f"Python version: {sys.version}", flush=True)
+print(f"Current directory: {os.getcwd()}", flush=True)
+print(f"Files in directory: {os.listdir('.')}", flush=True)
 
 # Check if running on Render
 IS_RENDER = os.environ.get('RENDER', False)
-print(f"Running on Render: {IS_RENDER}")
+print(f"Running on Render: {IS_RENDER}", flush=True)
 
 try:
     app = Flask(
