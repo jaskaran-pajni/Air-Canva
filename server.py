@@ -1,9 +1,10 @@
 import numpy as np
 import cv2
+import os
 import json
 import time
 from flask_cors import CORS
-from flask import Flask, Response, jsonify, request, render_template, stream_with_context
+from flask import Flask, Response, jsonify, request, stream_with_context
 from config import CFG
 from camera_manager import CameraManager
 from event_store import EventStore
@@ -26,12 +27,16 @@ pipeline = Pipeline(store, actions)
 if hasattr(pipeline, "set_mode"):
     pipeline.set_mode("gesture")
 
-@app.route("/")
+@app.get("/")
 def index():
-    return render_template("index.html")
+    return jsonify({"ok": True, "service": "air-motion-canvas-backend"})
 
 @app.route("/video_feed")
 def video_feed():
+     # 🚫 Disable webcam on Render
+    if os.getenv("RENDER"):
+        return jsonify({"ok": False, "error": "video_feed not available on Render"}), 400
+    
     def gen():
         cam = CameraManager(CFG.camera_index, CFG.width, CFG.height)
         try:
