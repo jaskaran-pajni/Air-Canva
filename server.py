@@ -70,13 +70,23 @@ except Exception as e:
 
 @app.route("/")
 def index():
-    print("📍 Root endpoint accessed")
-    return jsonify({"ok": True, "service": "air-motion-canvas-backend"})
+    print("📍 Root endpoint accessed", flush=True)
+    return jsonify({
+        "ok": True, 
+        "service": "air-motion-canvas-backend",
+        "status": "running",
+        "port": CFG.port
+    })
 
 @app.route("/health")
 def health():
-    return {"ok": True, "status": "healthy", "timestamp": time.time()}
-
+    return jsonify({
+        "ok": True, 
+        "status": "healthy", 
+        "timestamp": time.time(),
+        "port": CFG.port
+    })
+    
 @app.route("/debug")
 def debug_info():
     """Debug endpoint to check system status"""
