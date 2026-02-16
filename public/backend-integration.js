@@ -2,19 +2,21 @@
 // BACKEND INTEGRATION MODULE
 // ===================================
 
-const API_BASE = window.API_BASE = "https://air-motion-canvas.onrender.com"; // Render backend
+// Determine API base URL - works locally and on Render
+const API_BASE = window.location.origin; // This will use the current domain
+
 let stream = null;
 let sendTimer = null;
 let sending = false;
 
-
 const state = {
   isLiveMode: false,
-  detectionMode: "gesture", // 'motion' or 'gesture'
+  detectionMode: "gesture",
   isMonitoring: true,
   eventCount: 0,
   events: [],
   startTime: Date.now(),
+  isRender: window.location.hostname.includes('onrender.com') // Detect if on Render
 };
 
 // --- API CALLS ---
@@ -240,26 +242,17 @@ function startSendingFrames(canvas) {
 
   const ctx = canvas.getContext("2d");
 
-  // ✅ Make sure canvas has real size (avoid black screen)
   if (!canvas.width) canvas.width = 960;
   if (!canvas.height) canvas.height = 540;
 
-  const BASE =
-    (window.API_BASE || window.RENDER_BASE || "").trim() ||
-    "https://air-motion-canvas.onrender.com"; // ✅ fallback to your Render URL
-
   sendTimer = setInterval(async () => {
     if (!state._video) return;
-
-    // ✅ prevent overlapping uploads
     if (sending) return;
     sending = true;
 
     try {
-      // draw webcam to canvas (so user sees it)
       ctx.drawImage(state._video, 0, 0, canvas.width, canvas.height);
 
-      // send frame to backend
       const blob = await new Promise((resolve) =>
         canvas.toBlob(resolve, "image/jpeg", 0.7)
       );
@@ -268,12 +261,11 @@ function startSendingFrames(canvas) {
       const fd = new FormData();
       fd.append("frame", blob, "frame.jpg");
 
-      const res = await fetch(`${BASE}/api/detect`, {
+      const res = await fetch(`${API_BASE}/api/detect`, {
         method: "POST",
         body: fd,
       });
 
-      // ✅ if backend errors, show it
       if (!res.ok) {
         const text = await res.text();
         console.error("detect failed:", res.status, text);
@@ -291,7 +283,7 @@ function startSendingFrames(canvas) {
     } finally {
       sending = false;
     }
-  }, 250); // 4 fps
+  }, 250);
 }
 
 function stopSendingFrames() {

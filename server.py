@@ -11,6 +11,9 @@ from event_store import EventStore
 from actions import Actions
 from pipeline import Pipeline
 
+# Check if running on Render
+IS_RENDER = os.environ.get('RENDER', False)
+
 app = Flask(
     __name__,
     template_folder="app/templates",
@@ -19,9 +22,18 @@ app = Flask(
 )
 CORS(app)
 
+# Initialize components
 store = EventStore(CFG.log_path, maxlen=CFG.max_events_in_memory)
 actions = Actions(CFG.snapshot_dir)
-pipeline = Pipeline(store, actions)
+
+# Only initialize pipeline if NOT on Render, or handle gracefully
+if IS_RENDER:
+    print("🚀 Running on Render - Camera features disabled")
+    pipeline = None
+else:
+    pipeline = Pipeline(store, actions)
+    if hasattr(pipeline, "set_mode"):
+        pipeline.set_mode("gesture")
 
 # Force Air Canvas (Gesture) as the default mode for testing
 if hasattr(pipeline, "set_mode"):
@@ -33,9 +45,9 @@ def index():
 
 @app.route("/video_feed")
 def video_feed():
-     # 🚫 Disable webcam on Render
-    if os.getenv("RENDER"):
-        return jsonify({"ok": False, "error": "video_feed not available on Render"}), 400
+    # Disable webcam on Render
+    if IS_RENDER:
+        return jsonify({"ok": False, "error": "Video feed not available on Render - this is a cloud deployment without camera access"}), 400
     
     def gen():
         cam = CameraManager(CFG.camera_index, CFG.width, CFG.height)
@@ -48,7 +60,7 @@ def video_feed():
                     time.sleep(0.03)
                     continue
 
-                if getattr(pipeline, "is_monitoring", True):
+                if pipeline and getattr(pipeline, "is_monitoring", True):
                     annotated = pipeline.step(frame)
                 else:
                     annotated = frame
@@ -77,6 +89,18 @@ def health():
 
 @app.route("/api/detect", methods=["POST"])
 def api_detect():
+    if IS_RENDER:
+        # Return mock data for Render
+        return jsonify({
+            "ok": True, 
+            "mode": "gesture", 
+            "events": [{
+                "type": "info",
+                "timestamp": time.time(),
+                "message": "Running in cloud mode - camera simulation"
+            }]
+        })
+    
     if "frame" not in request.files:
         return jsonify({"ok": False, "error": "Missing 'frame'"}), 400
 
@@ -86,11 +110,12 @@ def api_detect():
         return jsonify({"ok": False, "error": "Bad image"}), 400
 
     # Process frame (stores events)
-    pipeline.step(frame)
+    if pipeline:
+        pipeline.step(frame)
 
     # Return recent events
     events = store.latest(5)
-    return jsonify({"ok": True, "mode": pipeline.mode, "events": events})
+    return jsonify({"ok": True, "mode": pipeline.mode if pipeline else "gesture", "events": events})
 
 @app.route("/events")
 def events_sse():
