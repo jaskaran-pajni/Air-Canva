@@ -2,9 +2,10 @@
 // BACKEND INTEGRATION MODULE
 // ===================================
 
-const API_BASE = "https://air-motion-canvas.onrender.com"; // Render backend
+const API_BASE = window.API_BASE = "https://air-motion-canvas.onrender.com"; // Render backend
 let stream = null;
 let sendTimer = null;
+let sending = false;
 
 
 const state = {
@@ -64,50 +65,112 @@ async function toggleMonitoring() {
 // --- VIEW SWITCHING (Live vs Demo) ---
 
 async function switchView(view) {
-  state.isLiveMode = (view === "live");
+  const goingLive = (view === "live");
+  state.isLiveMode = goingLive;
 
   const canvas = document.getElementById("videoCanvas");
   const img = document.getElementById("videoImg");
   const demoBtn = document.getElementById("demoModeBtn");
   const liveBtn = document.getElementById("liveModeBtn");
 
-  if (state.isLiveMode) {
-    
-    canvas.style.display = "block";
-    img.style.display = "none";
-    img.src = ""; // live img
-    demoBtn.classList.remove("active");
-    liveBtn.classList.add("active");
+  // Prevent double-start / double-stop
+  if (goingLive && state._startingLive) return;
+  if (!goingLive && state._stoppingLive) return;
 
-    await startBrowserCamera(canvas);
-    startSendingFrames(canvas);
+  if (goingLive) {
+    state._startingLive = true;
+
+    try {
+      // UI: Live uses browser camera -> show canvas, hide img
+      canvas.style.display = "block";
+      img.style.display = "none";
+      img.src = "";
+
+      demoBtn.classList.remove("active");
+      liveBtn.classList.add("active");
+
+      // Close any old SSE connection before starting
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+
+      // Stop any previous loops/camera just in case
+      stopSendingFrames();
+      stopBrowserCamera();
+
+      // Start browser camera and frame sending
+      await startBrowserCamera(canvas);
+      startSendingFrames(canvas);
+
+      // Optional: connect SSE (only if your backend supports it + CORS works)
+      connectSSE();
+    } catch (err) {
+      console.error("Failed to start Live mode:", err);
+
+      // If Live fails, fallback to Demo UI state
+      state.isLiveMode = false;
+      demoBtn.classList.add("active");
+      liveBtn.classList.remove("active");
+
+      stopSendingFrames();
+      stopBrowserCamera();
+
+      canvas.style.display = "block";
+      img.style.display = "none";
+      img.src = "";
+    } finally {
+      state._startingLive = false;
+    }
+
   } else {
-    // Demo mode = stop camera + stop sending
-    demoBtn.classList.add("active");
-    liveBtn.classList.remove("active");
+    state._stoppingLive = true;
 
-    stopSendingFrames();
-    stopBrowserCamera();
+    try {
+      // UI: Demo uses canvas drawing too (if you want demo animations),
+      // otherwise you can hide canvas here. Keeping it visible is fine.
+      canvas.style.display = "block";
+      img.style.display = "none";
+      img.src = "";
 
-    
-    if (state.eventSource) state.eventSource.close();
+      demoBtn.classList.add("active");
+      liveBtn.classList.remove("active");
+
+      // Stop live camera + frame loop
+      stopSendingFrames();
+      stopBrowserCamera();
+
+      // Stop SSE if used
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+    } finally {
+      state._stoppingLive = false;
+    }
   }
 }
+
 
 
 // --- SSE HANDLING ---
 
 function connectSSE() {
   if (state.eventSource) state.eventSource.close();
+
   state.eventSource = new EventSource(`${API_BASE}/events`);
 
   state.eventSource.onmessage = (e) => {
     const data = JSON.parse(e.data);
     if (data.type === "gesture") {
-      addLogEntry(`Gesture: ${data.meta.status}`, "started");
+      addLogEntry(`Gesture: ${data.meta?.status || "detected"}`, "started");
     } else if (data.type === "motion") {
       addLogEntry("Motion Detected", "started");
     }
+  };
+
+  state.eventSource.onerror = (err) => {
+    console.error("SSE error:", err);
   };
 }
 
@@ -157,6 +220,7 @@ async function startBrowserCamera(canvas) {
 
   stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
   video.srcObject = stream;
+  await video.play(); // ✅ helps on some browsers
 
   await new Promise(res => video.onloadedmetadata = res);
 
@@ -176,33 +240,57 @@ function startSendingFrames(canvas) {
 
   const ctx = canvas.getContext("2d");
 
+  // ✅ Make sure canvas has real size (avoid black screen)
+  if (!canvas.width) canvas.width = 960;
+  if (!canvas.height) canvas.height = 540;
+
+  const BASE =
+    (window.API_BASE || window.RENDER_BASE || "").trim() ||
+    "https://air-motion-canvas.onrender.com"; // ✅ fallback to your Render URL
+
   sendTimer = setInterval(async () => {
     if (!state._video) return;
 
-    // draw webcam to canvas (so user sees it)
-    ctx.drawImage(state._video, 0, 0, canvas.width, canvas.height);
+    // ✅ prevent overlapping uploads
+    if (sending) return;
+    sending = true;
 
-    // send frame to backend
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
+    try {
+      // draw webcam to canvas (so user sees it)
+      ctx.drawImage(state._video, 0, 0, canvas.width, canvas.height);
+
+      // send frame to backend
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", 0.7)
+      );
+      if (!blob) { sending = false; return; }
 
       const fd = new FormData();
       fd.append("frame", blob, "frame.jpg");
 
-      try {
-        const res = await fetch(`${API_BASE}/api/detect`, { method: "POST", body: fd });
-        const data = await res.json();
+      const res = await fetch(`${BASE}/api/detect`, {
+        method: "POST",
+        body: fd,
+      });
 
-        // show logs quickly
-        if (Array.isArray(data.events) && data.events.length) {
-          const last = data.events[data.events.length - 1];
-          addLogEntry(`${last.type || "event"} detected`, "started");
-        }
-      } catch (e) {
-        console.error("detect failed", e);
+      // ✅ if backend errors, show it
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("detect failed:", res.status, text);
+        return;
       }
-    }, "image/jpeg", 0.7);
 
+      const data = await res.json();
+
+      if (Array.isArray(data.events) && data.events.length) {
+        const last = data.events[data.events.length - 1];
+        addLogEntry(`${last.type || "event"} detected`, "started");
+      }
+    } catch (e) {
+      console.error("detect failed", e);
+    } finally {
+      sending = false;
+    }
   }, 250); // 4 fps
 }
 
