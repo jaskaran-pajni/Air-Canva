@@ -1,6 +1,8 @@
+import numpy as np
 import cv2
 import json
 import time
+from flask_cors import CORS
 from flask import Flask, Response, jsonify, request, render_template, stream_with_context
 from config import CFG
 from camera_manager import CameraManager
@@ -14,6 +16,7 @@ app = Flask(
     static_folder="app/static",
     static_url_path="/app/static",
 )
+CORS(app)
 
 store = EventStore(CFG.log_path, maxlen=CFG.max_events_in_memory)
 actions = Actions(CFG.snapshot_dir)
@@ -62,6 +65,27 @@ def video_feed():
             print("扫 /video_feed camera closed")
 
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+@app.route("/health")
+def health():
+    return {"ok": True}
+
+@app.route("/api/detect", methods=["POST"])
+def api_detect():
+    if "frame" not in request.files:
+        return jsonify({"ok": False, "error": "Missing 'frame'"}), 400
+
+    data = np.frombuffer(request.files["frame"].read(), dtype=np.uint8)
+    frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if frame is None:
+        return jsonify({"ok": False, "error": "Bad image"}), 400
+
+    # Process frame (stores events)
+    pipeline.step(frame)
+
+    # Return recent events
+    events = store.latest(5)
+    return jsonify({"ok": True, "mode": pipeline.mode, "events": events})
 
 @app.route("/events")
 def events_sse():

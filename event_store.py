@@ -22,6 +22,7 @@ class EventStore:
             with open(log_path, "w", encoding="utf-8") as f:
                 pass
 
+
     def add(self, event: Event) -> None:
         # Ensure required fields exist
         event = dict(event)
@@ -42,3 +43,5 @@ class EventStore:
     def clear_memory(self) -> None:
         with self._lock:
             self._events.clear()
+            
+            
