@@ -3,6 +3,8 @@ import cv2
 import os
 import json
 import time
+import sys
+import traceback
 from flask_cors import CORS
 from flask import Flask, Response, jsonify, request, stream_with_context
 from config import CFG
@@ -11,40 +13,85 @@ from event_store import EventStore
 from actions import Actions
 from pipeline import Pipeline
 
+# Force print to flush immediately
+print = lambda *args, **kwargs: __builtins__.print(*args, **kwargs, flush=True)
+
+print("🚀 Starting server.py...")
+print(f"Python version: {sys.version}")
+print(f"Current directory: {os.getcwd()}")
+print(f"Files in directory: {os.listdir('.')}")
+
 # Check if running on Render
 IS_RENDER = os.environ.get('RENDER', False)
+print(f"Running on Render: {IS_RENDER}")
 
-app = Flask(
-    __name__,
-    template_folder="app/templates",
-    static_folder="app/static",
-    static_url_path="/app/static",
-)
-CORS(app)
+try:
+    app = Flask(
+        __name__,
+        template_folder="app/templates",
+        static_folder="app/static",
+        static_url_path="/app/static",
+    )
+    print("✅ Flask app created")
+    
+    CORS(app)
+    print("✅ CORS enabled")
+    
+except Exception as e:
+    print(f"❌ Error creating Flask app: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
-# Initialize components
-store = EventStore(CFG.log_path, maxlen=CFG.max_events_in_memory)
-actions = Actions(CFG.snapshot_dir)
+# Initialize components with error handling
+try:
+    print("Initializing EventStore...")
+    store = EventStore(CFG.log_path, maxlen=CFG.max_events_in_memory)
+    print("✅ EventStore initialized")
+    
+    print("Initializing Actions...")
+    actions = Actions(CFG.snapshot_dir)
+    print("✅ Actions initialized")
+    
+    # Only initialize pipeline if NOT on Render, or handle gracefully
+    if IS_RENDER:
+        print("🚀 Running on Render - Camera features disabled")
+        pipeline = None
+    else:
+        print("Initializing Pipeline...")
+        pipeline = Pipeline(store, actions)
+        if hasattr(pipeline, "set_mode"):
+            pipeline.set_mode("gesture")
+        print("✅ Pipeline initialized")
+        
+except Exception as e:
+    print(f"❌ Error initializing components: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
-# Only initialize pipeline if NOT on Render, or handle gracefully
-if IS_RENDER:
-    print("🚀 Running on Render - Camera features disabled")
-    pipeline = None
-else:
-    pipeline = Pipeline(store, actions)
-    if hasattr(pipeline, "set_mode"):
-        pipeline.set_mode("gesture")
-
-# Force Air Canvas (Gesture) as the default mode for testing
-if hasattr(pipeline, "set_mode"):
-    pipeline.set_mode("gesture")
-
-@app.get("/")
+@app.route("/")
 def index():
+    print("📍 Root endpoint accessed")
     return jsonify({"ok": True, "service": "air-motion-canvas-backend"})
+
+@app.route("/health")
+def health():
+    return {"ok": True, "status": "healthy", "timestamp": time.time()}
+
+@app.route("/debug")
+def debug_info():
+    """Debug endpoint to check system status"""
+    return jsonify({
+        "ok": True,
+        "is_render": IS_RENDER,
+        "python_version": sys.version,
+        "cwd": os.getcwd(),
+        "files": os.listdir('.'),
+        "env_vars": {k: v for k, v in os.environ.items() if not k.startswith('_')}
+    })
 
 @app.route("/video_feed")
 def video_feed():
+    print("📍 Video feed endpoint accessed")
     # Disable webcam on Render
     if IS_RENDER:
         return jsonify({"ok": False, "error": "Video feed not available on Render - this is a cloud deployment without camera access"}), 400
@@ -82,10 +129,6 @@ def video_feed():
             print("扫 /video_feed camera closed")
 
     return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
-
-@app.route("/health")
-def health():
-    return {"ok": True}
 
 @app.route("/api/detect", methods=["POST"])
 def api_detect():
@@ -145,23 +188,27 @@ def api_mode():
     cmd = data.get("cmd")
     
     if cmd == "monitoring":
-        pipeline.is_monitoring = bool(data.get("enabled", True))
-        return jsonify({"ok": True, "monitoring": pipeline.is_monitoring})
+        if pipeline:
+            pipeline.is_monitoring = bool(data.get("enabled", True))
+            return jsonify({"ok": True, "monitoring": pipeline.is_monitoring})
+        return jsonify({"ok": False, "error": "Pipeline not initialized"}), 400
 
     mode = data.get("mode")
     if mode in ["motion", "gesture"]:
-        pipeline.set_mode(mode)
-        return jsonify({"ok": True, "mode": pipeline.mode})
+        if pipeline:
+            pipeline.set_mode(mode)
+            return jsonify({"ok": True, "mode": pipeline.mode})
+        return jsonify({"ok": False, "error": "Pipeline not initialized"}), 400
 
     return jsonify({"ok": False, "error": "Invalid command"}), 400
 
 @app.route("/api/clear_canvas", methods=["POST"])
 def clear_canvas():
-    # Looks for the clear() method in your GestureDetector instance inside the pipeline
-    if hasattr(pipeline, "gesture") and pipeline.gesture.available:
+    if pipeline and hasattr(pipeline, "gesture") and pipeline.gesture and pipeline.gesture.available:
         pipeline.gesture.clear()
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Gesture system not initialized"}), 400
 
-if __name__ == "__main__":
-    app.run(host=CFG.host, port=CFG.port, threaded=True)
+print("✅ All routes registered")
+print(f"🚀 Server will start on port: {CFG.port}")
+print("=" * 50)
