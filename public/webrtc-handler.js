@@ -3,7 +3,7 @@ if (window.location.hostname.includes('onrender.com') && window.location.protoco
     window.location.protocol = 'https:';
 }
 
-// webrtc-handler.js - FIXED VERSION with camera debugging
+// WebRTC handler loaded
 console.log("WebRTC handler loaded");
 
 // WebRTC variables
@@ -12,7 +12,32 @@ let localStream = null;
 let webrtcActive = false;
 let remoteVideo = null;
 let localVideoMonitor = null; // For monitoring local frames
-const webrtcSocket = io();
+
+// Socket.IO connection with explicit configuration
+const webrtcSocket = io({
+    path: '/socket.io',
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
+    timeout: 20000
+});
+
+// Socket.IO event handlers
+webrtcSocket.on('connect', () => {
+    console.log('✅ Connected to WebRTC server');
+    if (window.addLogEntry) {
+        window.addLogEntry('Connected to WebRTC server', 'started');
+    }
+});
+
+webrtcSocket.on('connect_error', (error) => {
+    console.error('❌ Socket.IO connection error:', error);
+});
+
+webrtcSocket.on('disconnect', (reason) => {
+    console.log('🔌 Socket.IO disconnected:', reason);
+});
 
 // Override the switchView function
 window.switchView = async function(view) {

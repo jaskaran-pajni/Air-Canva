@@ -32,7 +32,13 @@ app = Flask(
 app.config['SECRET_KEY'] = 'air-canvas-secret'
 CORS(app)
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# After creating the app, add this
+socketio = SocketIO(app, 
+                    cors_allowed_origins="*", 
+                    async_mode='threading',
+                    path='/socket.io',  # Explicitly set the path
+                    ping_timeout=60,
+                    ping_interval=25)
 
 # Store peer connections
 pcs = set()
