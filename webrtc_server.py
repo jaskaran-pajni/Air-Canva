@@ -106,7 +106,7 @@ class VideoTransformTrack(VideoStreamTrack):
         
         # Start the frame reader task in the RTC loop
         asyncio.run_coroutine_threadsafe(self._read_frames(), rtc_loop)
-        
+    
     async def _read_frames(self):
         """Continuously read frames from the incoming track"""
         print(f"📖 Starting frame reader for {self.sid[:8]}", flush=True)
@@ -117,7 +117,7 @@ class VideoTransformTrack(VideoStreamTrack):
                     frame = await self.track.recv()
                     self.frame_count += 1
                     
-                    # Store the last frame for sending back
+                    # Store the last frame
                     self.last_frame = frame
                     frame_counts[self.sid] = self.frame_count
                     
@@ -148,28 +148,26 @@ class VideoTransformTrack(VideoStreamTrack):
                 
                 # Process based on mode
                 if current_mode == "gesture" and gesture_detector and gesture_detector.available:
-                    img, events = gesture_detector.process(img)
+                    processed_img, events = gesture_detector.process(img)
                     if events:
-                        # Send events to client via socketio
                         socketio.emit('detection_results', events, room=self.sid)
                 elif current_mode == "motion" and motion_detector:
-                    img, events = motion_detector.process(img)
+                    processed_img, events = motion_detector.process(img)
                     if events:
                         socketio.emit('detection_results', events, room=self.sid)
+                else:
+                    processed_img = img
                 
                 # Convert back to AV frame
-                new_frame = av.VideoFrame.from_ndarray(img, format="bgr24")
+                new_frame = av.VideoFrame.from_ndarray(processed_img, format="bgr24")
                 new_frame.pts = self.last_frame.pts
                 new_frame.time_base = self.last_frame.time_base
                 return new_frame
             else:
                 # Return a blank frame with a message
-                print(f"⏳ No frames yet for {self.sid[:8]}, sending blank", flush=True)
                 blank = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(blank, "Waiting for video...", (50, 240), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                cv2.putText(blank, f"Client: {self.sid[:8]}", (50, 280),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                 
                 frame = av.VideoFrame.from_ndarray(blank, format="bgr24")
                 frame.pts = 0

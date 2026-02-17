@@ -18,7 +18,8 @@ class GestureDetector:
         # Persistence state
         self.canvas = None
         self.prev_pt = None
-        self.drawing_state = False # True = Pen Down, False = Hover
+        self.drawing_state = False
+        self.last_frame_with_canvas = None
 
         try:
             import mediapipe as mp  # type: ignore
@@ -50,13 +51,14 @@ class GestureDetector:
         self.canvas = None
         self.prev_pt = None
         self.drawing_state = False
+        self.last_frame_with_canvas = None
+        print("🧹 Canvas cleared")
 
     def _is_finger_up(self, landmarks, finger_index, h, w):
         """
         Utility to check if a specific finger is extended.
         Indices: 8=Index, 12=Middle, 16=Ring, 20=Pinky
         """
-        # Logic: Is the tip (index) higher (lower y-value) than the PIP joint (index-2)?
         tip = landmarks.landmark[finger_index]
         pip = landmarks.landmark[finger_index - 2]
         return tip.y < pip.y
@@ -73,7 +75,8 @@ class GestureDetector:
 
         # 2. Initialize persistent canvas if it doesn't exist
         if self.canvas is None:
-            self.canvas = np.zeros_like(frame)
+            self.canvas = np.zeros((h, w, 3), dtype=np.uint8)
+            print("🆕 New canvas created")
 
         # 3. MediaPipe Processing
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -83,8 +86,10 @@ class GestureDetector:
         if not result.multi_hand_landmarks:
             self.prev_pt = None
             self.drawing_state = False
+            # Blend canvas with frame
             out = cv2.addWeighted(frame, 1.0, self.canvas, 1.0, 0)
-            return out, []
+            self.last_frame_with_canvas = out
+            return out, events
 
         hand_landmarks = result.multi_hand_landmarks[0]
         
@@ -96,7 +101,6 @@ class GestureDetector:
         ix, iy = int(index_tip.x * w), int(index_tip.y * h)
 
         # 5. Gesture Logic
-        # Check if Index is UP and other fingers are DOWN
         index_up = self._is_finger_up(hand_landmarks, 8, h, w)
         middle_up = self._is_finger_up(hand_landmarks, 12, h, w)
         ring_up = self._is_finger_up(hand_landmarks, 16, h, w)
@@ -105,8 +109,8 @@ class GestureDetector:
         # DRAWING MODE: Index Up, others down
         should_draw = index_up and not middle_up and not ring_up and not pinky_up
         
-        # HOVER MODE: If it's a fist (all fingers down including index)
-        # Or if multiple fingers are up (Selection mode)
+        # DEBUG PRINT - Moved inside the method
+        print(f"🎯 Drawing state: {self.drawing_state}, should_draw: {should_draw}")
         
         # Visual Cursor
         cursor_color = (0, 255, 0) if should_draw else (0, 0, 255)
@@ -138,7 +142,13 @@ class GestureDetector:
             self.drawing_state = False
             self.prev_pt = None
 
-        # 6. Final Composition
-        # Add the drawing canvas onto the live frame
+        # 6. Final Composition - Add the drawing canvas onto the live frame
         out = cv2.addWeighted(frame, 1.0, self.canvas, 1.0, 0)
+        
+        # Draw a small indicator that canvas exists
+        if np.any(self.canvas):  # If canvas has any drawings
+            cv2.putText(out, "✏️ Drawing Active", (10, 60), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        self.last_frame_with_canvas = out
         return out, events
