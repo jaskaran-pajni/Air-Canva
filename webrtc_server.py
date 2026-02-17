@@ -333,4 +333,6 @@ print("=" * 50, flush=True)
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", CFG.port))
     print(f"🎯 Starting server on port {port}...", flush=True)
-    socketio.run(app, host='0.0.0.0', port=port, debug=True)
+    
+    # Use eventlet for production (better performance)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
