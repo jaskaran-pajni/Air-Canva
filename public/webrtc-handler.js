@@ -4,16 +4,18 @@ if (window.location.hostname.includes('onrender.com') && window.location.protoco
 }
 
 // WebRTC handler loaded
-console.log("WebRTC handler loaded");
+console.log("%c🎥 WebRTC Handler Loaded", "color: blue; font-size: 16px; font-weight: bold");
 
 // WebRTC variables
 let webrtcPC = null;
 let localStream = null;
 let webrtcActive = false;
 let remoteVideo = null;
-let localVideoMonitor = null; // For monitoring local frames
+let localVideoMonitor = null;
+let eventCount = 0;
 
-// Socket.IO connection with explicit configuration
+// Socket.IO connection
+console.log("🔌 Connecting to Socket.IO server...");
 const webrtcSocket = io({
     path: '/socket.io',
     transports: ['websocket', 'polling'],
@@ -23,60 +25,85 @@ const webrtcSocket = io({
     timeout: 20000
 });
 
+// ===== LOG FUNCTION FOR UI =====
+window.addLogEntry = function(text, type) {
+    const container = document.getElementById("logContainer");
+    if (!container) return;
+    
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+    
+    // Remove the "No recent events" placeholder if it exists
+    const emptyMsg = container.querySelector(".log-empty");
+    if (emptyMsg) {
+        emptyMsg.remove();
+    }
+    
+    entry.innerHTML = `<div class="log-status-dot ${type}"></div><div>${text}</div>`;
+    container.prepend(entry);
+    
+    // Limit the number of log entries (keep last 50)
+    while (container.children.length > 50) {
+        container.removeChild(container.lastChild);
+    }
+};
+// ==============================
+
 // Socket.IO event handlers
 webrtcSocket.on('connect', () => {
-    console.log('✅ Connected to WebRTC server');
+    console.log("%c✅ Connected to WebRTC server", "color: green; font-size: 14px");
     if (window.addLogEntry) {
         window.addLogEntry('Connected to WebRTC server', 'started');
     }
 });
 
 webrtcSocket.on('connect_error', (error) => {
-    console.error('❌ Socket.IO connection error:', error);
+    console.error("%c❌ Socket.IO connection error:", "color: red; font-size: 14px", error);
 });
 
 webrtcSocket.on('disconnect', (reason) => {
-    console.log('🔌 Socket.IO disconnected:', reason);
+    console.log("%c🔌 Socket.IO disconnected:", "color: orange; font-size: 14px", reason);
 });
+
 
 // Override the switchView function
 window.switchView = async function(view) {
-    console.log("Switch view called:", view);
+    console.log("%c🔄 Switch view called:", "color: purple; font-size: 14px", view);
     
     const canvas = document.getElementById("videoCanvas");
+    const remoteVideoEl = document.getElementById("remoteVideo");
     const img = document.getElementById("videoImg");
     const demoBtn = document.getElementById("demoModeBtn");
     const liveBtn = document.getElementById("liveModeBtn");
     
     if (view === "live") {
         try {
-            // Update UI
+            // Show canvas initially for local preview, hide others
             canvas.style.display = "block";
+            remoteVideoEl.style.display = "none";
             img.style.display = "none";
+            
             demoBtn.classList.remove("active");
             liveBtn.classList.add("active");
             
-            // Stop any existing streams
             stopCamera();
-            
-            // Start camera with WebRTC
             await startCameraWithWebRTC(canvas);
             
         } catch (err) {
-            console.error("Failed to start live mode:", err);
+            console.error("%c❌ Failed to start live mode:", "color: red", err);
             if (window.addLogEntry) {
                 window.addLogEntry("Camera failed: " + err.message, "ended");
             }
-            
-            // Fallback to demo
             canvas.style.display = "block";
+            remoteVideoEl.style.display = "none";
             img.style.display = "none";
             demoBtn.classList.add("active");
             liveBtn.classList.remove("active");
         }
     } else {
-        // Demo mode
+        // Demo mode - show canvas for local preview
         canvas.style.display = "block";
+        remoteVideoEl.style.display = "none";
         img.style.display = "none";
         demoBtn.classList.add("active");
         liveBtn.classList.remove("active");
@@ -85,35 +112,40 @@ window.switchView = async function(view) {
 };
 
 async function startCameraWithWebRTC(canvas) {
-    console.log("Starting camera with WebRTC...");
+    console.log("%c📷 Starting camera with WebRTC...", "color: cyan; font-size: 14px");
     
     try {
-        // Check browser support
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             throw new Error("Browser doesn't support camera access");
         }
         
-        // Get local camera stream
+        console.log("  Requesting camera access...");
+        
+        // OPTIMIZED: Lower resolution and frame rate for better performance
         localStream = await navigator.mediaDevices.getUserMedia({ 
             video: { 
-                width: { ideal: 640 },
-                height: { ideal: 480 },
-                frameRate: { ideal: 30 }
+                width: { ideal: 320 },  // Reduced from 640
+                height: { ideal: 240 },  // Reduced from 480
+                frameRate: { ideal: 15 }  // Reduced from 30
             }, 
             audio: false 
         });
         
-        console.log("Got local stream, tracks:", localStream.getTracks().length);
+        console.log("%c✅ Got local stream", "color: green");
+        console.log(`  Tracks: ${localStream.getTracks().length}`);
         
-        // Log detailed track information
         localStream.getTracks().forEach(track => {
-            console.log(`  Track kind: ${track.kind}, enabled: ${track.enabled}, readyState: ${track.readyState}, muted: ${track.muted}`);
+            console.log(`  Track: ${track.kind}`, {
+                enabled: track.enabled,
+                readyState: track.readyState,
+                muted: track.muted,
+                label: track.label
+            });
         });
         
-        // Create a monitor to verify frames are actually being captured
-        startFrameMonitor(localStream);
+        // Skip frame monitor for performance (optional)
+        // startFrameMonitor(localStream);
         
-        // Show local video on canvas as fallback
         const localVideo = document.createElement("video");
         localVideo.srcObject = localStream;
         localVideo.autoplay = true;
@@ -123,18 +155,10 @@ async function startCameraWithWebRTC(canvas) {
         await localVideo.play();
         console.log("✅ Local video playing");
         
-        // Verify video is actually playing
-        if (localVideo.readyState < 2) {
-            console.warn("⚠️ Local video not ready yet (readyState: " + localVideo.readyState + ")");
-        } else {
-            console.log("✅ Local video readyState: " + localVideo.readyState);
-        }
-        
-        canvas.width = localVideo.videoWidth || 640;
-        canvas.height = localVideo.videoHeight || 480;
+        canvas.width = localVideo.videoWidth || 320;
+        canvas.height = localVideo.videoHeight || 240;
         console.log(`📐 Canvas size set to: ${canvas.width} x ${canvas.height}`);
         
-        // Draw local video initially with frame counter
         const ctx = canvas.getContext('2d');
         let localFrameCount = 0;
         
@@ -143,13 +167,12 @@ async function startCameraWithWebRTC(canvas) {
                 ctx.drawImage(localVideo, 0, 0, canvas.width, canvas.height);
                 localFrameCount++;
                 
-                // Draw frame counter on canvas for visual feedback
-                ctx.fillStyle = 'white';
-                ctx.font = '12px Arial';
-                ctx.fillText(`Local frames: ${localFrameCount}`, 10, 20);
-                
-                if (localFrameCount % 30 === 0) {
-                    console.log(`🎥 Local camera frame ${localFrameCount} drawn to canvas`);
+                // Only draw text every few frames to reduce CPU
+                if (localFrameCount % 15 === 0) {
+                    ctx.fillStyle = 'white';
+                    ctx.font = '12px Arial';
+                    ctx.fillText(`Local: ${localFrameCount}`, 10, 20);
+                    ctx.fillText(`Mode: ${window.currentMode || 'gesture'}`, 10, 40);
                 }
                 requestAnimationFrame(drawLocal);
             } else {
@@ -158,16 +181,16 @@ async function startCameraWithWebRTC(canvas) {
         }
         drawLocal();
         
-        // Start WebRTC connection
         await setupWebRTC(localStream, canvas);
         
     } catch (err) {
-        console.error("Camera error:", err);
+        console.error("%c❌ Camera error:", "color: red", err);
         throw err;
     }
 }
 
-// New function to monitor local frames
+// Optional: Remove or comment out startFrameMonitor for better performance
+/*
 function startFrameMonitor(stream) {
     const videoTrack = stream.getVideoTracks()[0];
     if (!videoTrack) {
@@ -177,7 +200,6 @@ function startFrameMonitor(stream) {
     
     console.log("🎥 Starting frame monitor for track:", videoTrack.label);
     
-    // Create a hidden video element to monitor frames
     localVideoMonitor = document.createElement('video');
     localVideoMonitor.srcObject = new MediaStream([videoTrack]);
     localVideoMonitor.autoplay = true;
@@ -187,38 +209,31 @@ function startFrameMonitor(stream) {
     document.body.appendChild(localVideoMonitor);
     
     let frameCheckCount = 0;
+    let lastLogTime = Date.now();
+    
     localVideoMonitor.onloadeddata = () => {
         console.log("✅ Monitor video loaded, checking frames...");
         
         function checkFrame() {
-            if (localVideoMonitor.readyState >= 2) {
+            if (localVideoMonitor && localVideoMonitor.readyState >= 2) {
                 frameCheckCount++;
                 if (frameCheckCount % 30 === 0) {
-                    console.log(`📸 Local camera frame ${frameCheckCount} captured (monitor)`);
+                    const fps = Math.round(30 * 1000 / (Date.now() - lastLogTime));
+                    console.log(`📸 Local camera: ${frameCheckCount} frames captured (${fps} fps)`);
+                    lastLogTime = Date.now();
                 }
             }
             requestAnimationFrame(checkFrame);
         }
         checkFrame();
     };
-    
-    // Also monitor track stats
-    setInterval(() => {
-        if (videoTrack && typeof videoTrack.getStats === 'function') {
-            videoTrack.getStats().then(stats => {
-                console.log("📊 Track stats:", stats);
-            }).catch(err => {
-                // getStats might not be available, ignore
-            });
-        }
-    }, 5000);
 }
+*/
 
 async function setupWebRTC(stream, canvas) {
-    console.log("Setting up WebRTC...");
+    console.log("%c🔧 Setting up WebRTC...", "color: orange; font-size: 14px");
     
     try {
-        // Create peer connection
         webrtcPC = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -226,120 +241,83 @@ async function setupWebRTC(stream, canvas) {
             ]
         });
         
-        // Add local stream tracks
+        console.log("  Created RTCPeerConnection");
+        
         stream.getTracks().forEach(track => {
             webrtcPC.addTrack(track, stream);
-            console.log("Added track to WebRTC:", track.kind);
+            console.log("  Added track to WebRTC:", track.kind);
         });
         
-        // Add negotiation needed handler
-        webrtcPC.onnegotiationneeded = () => {
-            console.log("🔄 Negotiation needed");
-        };
-        
-        // Handle incoming processed video
         webrtcPC.ontrack = (event) => {
-            console.log("🔥 Received remote track:", event.track.kind);
+            console.log("%c🔥 Received remote track:", "color: purple", event.track.kind);
             
             if (event.track.kind === 'video') {
-                console.log("📹 Creating remote video element");
+                console.log("📹 Connecting remote video element");
                 
-                // Create remote video element
-                remoteVideo = document.createElement('video');
-                remoteVideo.srcObject = new MediaStream([event.track]);
-                remoteVideo.autoplay = true;
-                remoteVideo.playsInline = true;
-                remoteVideo.muted = true;
-                
-                remoteVideo.onloadedmetadata = () => {
-                    console.log("✅ Remote video loaded! Dimensions:", 
-                        remoteVideo.videoWidth, "x", remoteVideo.videoHeight);
+                // Get the video element from HTML
+                const remoteVideoEl = document.getElementById('remoteVideo');
+                if (remoteVideoEl) {
+                    remoteVideoEl.srcObject = event.streams[0];
+                    remoteVideoEl.style.display = 'block';
                     
-                    // Start drawing remote video
-                    const ctx = canvas.getContext('2d');
-                    webrtcActive = true;
+                    // CRITICAL: Ensure no mirroring
+                    remoteVideoEl.style.transform = 'scaleX(1)';
+                    remoteVideoEl.style.webkitTransform = 'scaleX(1)';
                     
-                    let frameCount = 0;
-                    function drawRemote() {
-                        if (webrtcActive && remoteVideo.readyState >= 2) {
-                            ctx.drawImage(remoteVideo, 0, 0, canvas.width, canvas.height);
-                            frameCount++;
-                            if (frameCount % 30 === 0) {
-                                console.log("🎨 Drawing remote video frame", frameCount);
-                            }
+                    // Hide canvas when remote video is playing
+                    const canvas = document.getElementById("videoCanvas");
+                    canvas.style.display = 'none';
+                    
+                    remoteVideoEl.onloadeddata = () => {
+                        console.log("%c✅ Remote video playing!", "color: green");
+                        webrtcActive = true;
+                        
+                        if (window.addLogEntry) {
+                            window.addLogEntry("WebRTC connected - video playing", "started");
                         }
-                        requestAnimationFrame(drawRemote);
-                    }
-                    drawRemote();
+                    };
                     
-                    if (window.addLogEntry) {
-                        window.addLogEntry("WebRTC connected - processing started", "started");
-                    }
-                };
-                
-                remoteVideo.onerror = (err) => {
-                    console.error("❌ Remote video error:", err);
-                };
+                    remoteVideoEl.onerror = (err) => {
+                        console.error("❌ Remote video error:", err);
+                    };
+                }
                 
                 event.track.onended = () => {
                     console.log("⛔ Remote track ended");
                     webrtcActive = false;
+                    const remoteVideoEl = document.getElementById('remoteVideo');
+                    if (remoteVideoEl) {
+                        remoteVideoEl.style.display = 'none';
+                    }
+                    const canvas = document.getElementById("videoCanvas");
+                    canvas.style.display = 'block';
                 };
             }
         };
         
-        // Handle connection state
         webrtcPC.onconnectionstatechange = () => {
-            console.log("🔌 Connection state:", webrtcPC.connectionState);
             if (webrtcPC.connectionState === 'connected') {
-                console.log("✅✅✅ WebRTC fully connected! Video should start flowing.");
+                console.log("%c✅✅✅ WebRTC FULLY CONNECTED!", "color: green; font-size: 14px");
                 if (window.addLogEntry) {
                     window.addLogEntry('WebRTC fully connected', 'started');
                 }
-            } else if (webrtcPC.connectionState === 'failed') {
-                console.error("❌ WebRTC connection failed");
-                webrtcActive = false;
             }
         };
         
-        // Enhanced ICE connection state monitoring with stats
-        webrtcPC.oniceconnectionstatechange = () => {
-            console.log("❄️ ICE connection state:", webrtcPC.iceConnectionState);
-            
-            if (webrtcPC.iceConnectionState === 'connected') {
-                console.log("✅ ICE Connected - checking stats...");
-                
-                // Check stats to see if video is actually sending
-                webrtcPC.getStats().then(stats => {
-                    stats.forEach(report => {
-                        if (report.type === 'outbound-rtp' && report.kind === 'video') {
-                            console.log(`📤 Video packets sent: ${report.packetsSent}, bytes: ${report.bytesSent}`);
-                        }
-                        if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                            console.log(`📥 Video packets received: ${report.packetsReceived}, bytes: ${report.bytesReceived}`);
-                        }
-                    });
-                }).catch(err => console.error("Stats error:", err));
-            }
-        };
-        
-        // Handle ICE candidates
         webrtcPC.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log("Sending ICE candidate");
                 webrtcSocket.emit('ice-candidate', event.candidate);
             }
         };
         
-        // Create offer
-        console.log("Creating offer...");
+        console.log("📤 Creating offer...");
         const offer = await webrtcPC.createOffer({
             offerToReceiveVideo: true,
             offerToReceiveAudio: false
         });
         
         await webrtcPC.setLocalDescription(offer);
-        console.log("Local description set, sending offer");
+        console.log("✅ Local description set, sending offer");
         
         webrtcSocket.emit('offer', {
             sdp: webrtcPC.localDescription.sdp,
@@ -347,16 +325,15 @@ async function setupWebRTC(stream, canvas) {
         });
         
     } catch (err) {
-        console.error("WebRTC setup failed:", err);
+        console.error("❌ WebRTC setup failed:", err);
         webrtcActive = false;
         throw err;
     }
 }
 
 function stopCamera() {
-    console.log("Stopping camera...");
+    console.log("%c🛑 Stopping camera...", "color: red");
     
-    // Clean up monitor
     if (localVideoMonitor) {
         localVideoMonitor.srcObject = null;
         localVideoMonitor.remove();
@@ -366,7 +343,6 @@ function stopCamera() {
     if (localStream) {
         localStream.getTracks().forEach(t => {
             t.stop();
-            console.log("Stopped track:", t.kind);
         });
         localStream = null;
     }
@@ -377,57 +353,52 @@ function stopCamera() {
     }
     
     webrtcActive = false;
-    remoteVideo = null;
+    
+    // Reset UI
+    const canvas = document.getElementById("videoCanvas");
+    const remoteVideoEl = document.getElementById("remoteVideo");
+    if (canvas) canvas.style.display = 'block';
+    if (remoteVideoEl) remoteVideoEl.style.display = 'none';
+    
+    console.log("✅ Camera stopped");
 }
 
-// Mode switching
 window.setDetectionMode = function(mode) {
-    console.log("Setting mode:", mode);
     webrtcSocket.emit('mode_change', { mode: mode });
     
-    // Update UI
     document.getElementById("motionModeBtn").classList.toggle("active", mode === "motion");
     document.getElementById("gestureModeBtn").classList.toggle("active", mode === "gesture");
+    window.currentMode = mode;
 };
 
 window.clearCanvas = function() {
-    console.log("Clearing canvas");
     webrtcSocket.emit('clear_canvas');
 };
 
-// Socket.io event handlers
-webrtcSocket.on('connect', () => {
-    console.log('Connected to WebRTC server');
-    if (window.addLogEntry) {
-        window.addLogEntry('Connected to WebRTC server', 'started');
-    }
-});
-
 webrtcSocket.on('answer', async (data) => {
-    console.log("Received answer from server");
     try {
         if (webrtcPC) {
             await webrtcPC.setRemoteDescription(new RTCSessionDescription(data));
-            console.log("Remote description set");
         }
     } catch (err) {
-        console.error('Error setting remote description:', err);
+        console.error('❌ Error setting remote description:', err);
     }
 });
 
 webrtcSocket.on('ice-candidate', async (candidate) => {
-    console.log("Received ICE candidate");
     try {
         if (webrtcPC) {
             await webrtcPC.addIceCandidate(new RTCIceCandidate(candidate));
         }
     } catch (err) {
-        console.error('Error adding ICE candidate:', err);
+        console.error('❌ Error adding ICE candidate:', err);
     }
 });
 
 webrtcSocket.on('detection_results', (events) => {
-    events.forEach(event => {
+    eventCount += events.length;
+    
+    events.forEach((event) => {
         if (window.addLogEntry) {
             if (event.type === 'gesture') {
                 window.addLogEntry(`Gesture: ${event.meta?.status || 'detected'}`, 'started');
@@ -439,33 +410,15 @@ webrtcSocket.on('detection_results', (events) => {
 });
 
 webrtcSocket.on('mode_changed', (data) => {
-    console.log("Mode changed to:", data.mode);
     if (window.addLogEntry) {
         window.addLogEntry(`Mode changed to: ${data.mode}`, 'ended');
     }
 });
 
 webrtcSocket.on('canvas_cleared', () => {
-    console.log("Canvas cleared");
     if (window.addLogEntry) {
         window.addLogEntry('Canvas cleared', 'ended');
     }
 });
 
-// Add a simple camera test function you can run from console
-window.testCamera = async function() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        console.log("✅ Camera test successful!", stream);
-        const video = document.createElement('video');
-        video.srcObject = stream;
-        video.autoplay = true;
-        video.controls = true;
-        video.width = 320;
-        document.body.appendChild(video);
-        console.log("📹 Test video added to page - you should see yourself");
-        return stream;
-    } catch (err) {
-        console.error("❌ Camera test failed:", err);
-    }
-};
+console.log("%c🎥 WebRTC handler initialization complete", "color: blue");

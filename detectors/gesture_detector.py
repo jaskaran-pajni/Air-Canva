@@ -20,9 +20,11 @@ class GestureDetector:
         self.prev_pt = None
         self.drawing_state = False
         self.last_frame_with_canvas = None
+        self.total_lines_drawn = 0
+        self.debug_mode = True
 
         try:
-            import mediapipe as mp  # type: ignore
+            import mediapipe as mp
             self.mp = mp
 
             if not hasattr(mp, "solutions"):
@@ -52,7 +54,8 @@ class GestureDetector:
         self.prev_pt = None
         self.drawing_state = False
         self.last_frame_with_canvas = None
-        print("🧹 Canvas cleared")
+        self.total_lines_drawn = 0
+        print("🧹 Canvas cleared - ALL drawings removed")
 
     def _is_finger_up(self, landmarks, finger_index, h, w):
         """
@@ -69,18 +72,19 @@ class GestureDetector:
 
         events: List[dict] = []
 
-        # 1. Mirror for natural interaction
-        frame = cv2.flip(frame_bgr, 1)
+        # REMOVE THE FLIP - use original frame
+        frame = frame_bgr  # Just use original, no flip
         h, w, _ = frame.shape
 
-        # 2. Initialize persistent canvas if it doesn't exist
-        if self.canvas is None:
-            self.canvas = np.zeros((h, w, 3), dtype=np.uint8)
-            print("🆕 New canvas created")
+        # 2. Initialize canvas with matching shape and uint8 type
+        if self.canvas is None or self.canvas.shape != frame.shape:
+            self.canvas = np.zeros_like(frame, dtype=np.uint8)
+            print("🆕 New canvas created", flush=True)
 
-        # 3. MediaPipe Processing
+        # 3. MediaPipe Processing (expects RGB) - Use original frame
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         result = self.hands.process(rgb)
+
 
         # Handle "No Hand" case
         if not result.multi_hand_landmarks:
@@ -89,16 +93,18 @@ class GestureDetector:
             # Blend canvas with frame
             out = cv2.addWeighted(frame, 1.0, self.canvas, 1.0, 0)
             self.last_frame_with_canvas = out
-            return out, events
+            return out.astype(np.uint8), events
 
         hand_landmarks = result.multi_hand_landmarks[0]
         
-        # Visual feedback: Draw the hand skeleton
+        # Visual feedback: Draw the hand skeleton on the flipped frame
         self.drawer.draw_landmarks(frame, hand_landmarks, self.mp.solutions.hands.HAND_CONNECTIONS)
 
-        # 4. Finger Tracking (Index Tip = Index 8)
+        # 4. Finger Tracking - Use direct coordinates (no extra mirroring)
+        # Since we already flipped the frame, the landmarks are already aligned
         index_tip = hand_landmarks.landmark[8]
-        ix, iy = int(index_tip.x * w), int(index_tip.y * h)
+        ix = int(index_tip.x * w)  # Direct coordinate - no (1 - x) needed!
+        iy = int(index_tip.y * h)
 
         # 5. Gesture Logic
         index_up = self._is_finger_up(hand_landmarks, 8, h, w)
@@ -109,9 +115,6 @@ class GestureDetector:
         # DRAWING MODE: Index Up, others down
         should_draw = index_up and not middle_up and not ring_up and not pinky_up
         
-        # DEBUG PRINT - Moved inside the method
-        print(f"🎯 Drawing state: {self.drawing_state}, should_draw: {should_draw}")
-        
         # Visual Cursor
         cursor_color = (0, 255, 0) if should_draw else (0, 0, 255)
         cv2.circle(frame, (ix, iy), 10, cursor_color, -1)
@@ -120,6 +123,8 @@ class GestureDetector:
             if self.prev_pt is not None:
                 # Draw on the persistent canvas
                 cv2.line(self.canvas, self.prev_pt, (ix, iy), (0, 0, 139), 6)
+                self.total_lines_drawn += 1
+                print(f"✅ Line drawn! Total: {self.total_lines_drawn}", flush=True)
             
             self.prev_pt = (ix, iy)
             
@@ -142,13 +147,19 @@ class GestureDetector:
             self.drawing_state = False
             self.prev_pt = None
 
-        # 6. Final Composition - Add the drawing canvas onto the live frame
+        # 6. Blend canvas with frame
         out = cv2.addWeighted(frame, 1.0, self.canvas, 1.0, 0)
         
-        # Draw a small indicator that canvas exists
-        if np.any(self.canvas):  # If canvas has any drawings
-            cv2.putText(out, "✏️ Drawing Active", (10, 60), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        # Add debug info
+        if self.total_lines_drawn > 0:
+            cv2.putText(out, f"Lines: {self.total_lines_drawn}", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(out, "✅ CANVAS HAS DRAWINGS", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        else:
+            cv2.putText(out, "❌ CANVAS EMPTY", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         
         self.last_frame_with_canvas = out
-        return out, events
+        # Ensure uint8 type for WebRTC
+        return out.astype(np.uint8), events

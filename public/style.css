@@ -730,3 +730,13 @@ body {
 .demo-button.primary:hover {
     background: #2563eb;
 }
+
+.video-container canvas,
+#remoteVideo,
+#videoImg {
+    transform: scaleX(-1);  /* This creates the mirror effect */
+    -webkit-transform: scaleX(-1);
+    -moz-transform: scaleX(-1);
+    -ms-transform: scaleX(-1);
+    -o-transform: scaleX(-1);
+}

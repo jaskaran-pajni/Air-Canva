@@ -5,6 +5,7 @@ import numpy as np
 import json
 import threading
 import time
+from fractions import Fraction
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCIceCandidate
 from aiortc.rtcrtpparameters import RTCRtpCodecParameters
@@ -32,13 +33,15 @@ app = Flask(
 app.config['SECRET_KEY'] = 'air-canvas-secret'
 CORS(app)
 
-# After creating the app, add this
+# Socket.IO configuration - disable verbose logging for performance
 socketio = SocketIO(app, 
                     cors_allowed_origins="*", 
                     async_mode='threading',
-                    path='/socket.io',  # Explicitly set the path
+                    path='/socket.io',
                     ping_timeout=60,
-                    ping_interval=25)
+                    ping_interval=25,
+                    logger=False,  # Disable for performance
+                    engineio_logger=False)  # Disable for performance
 
 # Store peer connections
 pcs = set()
@@ -59,23 +62,18 @@ gesture_detector = GestureDetector()
 print("Initializing MotionDetector...", flush=True)
 motion_detector = MotionDetector()
 current_mode = "gesture"
+print(f"🎮 Initial mode set to: {current_mode}", flush=True)
 
-# Frame monitoring function
+# Frame monitoring function (simplified for performance)
 async def monitor_frame_counts():
     """Monitor frame counts and alert if no frames are being received"""
-    print("🔍 Starting frame monitor...", flush=True)
     while True:
-        await asyncio.sleep(5)  # Check every 5 seconds
+        await asyncio.sleep(10)  # Check less frequently
         if frame_counts:
             for sid, count in list(frame_counts.items()):
                 if count == 0:
-                    print(f"⚠️ WARNING: No frames received for client {sid}!", flush=True)
-                else:
-                    print(f"📊 Client {sid[:8]} has received {count} frames", flush=True)
-            # Reset counts for next check
+                    print(f"⚠️ No frames for client {sid[:8]}", flush=True)
             frame_counts.clear()
-        else:
-            print("📊 No active clients", flush=True)
 
 # Start background monitoring thread
 def start_background_loop():
@@ -90,7 +88,7 @@ def start_background_loop():
 # Start monitoring in background thread
 monitor_thread = threading.Thread(target=start_background_loop, daemon=True)
 monitor_thread.start()
-print("📊 Frame monitor started in background thread", flush=True)
+print("📊 Frame monitor started", flush=True)
 
 class VideoTransformTrack(VideoStreamTrack):
     """Video track that processes frames with gesture detection"""
@@ -99,84 +97,71 @@ class VideoTransformTrack(VideoStreamTrack):
         super().__init__()
         self.track = track
         self.sid = sid
-        self.frame_count = 0
-        self.last_frame = None
+        self.processed_count = 0
+        self.skip_counter = 0
+        self.skip_every = 2  # Process every 2nd frame (50% reduction)
+        self.target_width = 320  # Processing resolution
+        self.target_height = 240
         frame_counts[sid] = 0
-        print(f"🎥 VideoTransformTrack created for {sid[:8]}", flush=True)
-        
-        # Start the frame reader task in the RTC loop
-        asyncio.run_coroutine_threadsafe(self._read_frames(), rtc_loop)
-    
-    async def _read_frames(self):
-        """Continuously read frames from the incoming track"""
-        print(f"📖 Starting frame reader for {self.sid[:8]}", flush=True)
-        try:
-            while True:
-                try:
-                    # Read frame from the track
-                    frame = await self.track.recv()
-                    self.frame_count += 1
-                    
-                    # Store the last frame
-                    self.last_frame = frame
-                    frame_counts[self.sid] = self.frame_count
-                    
-                    if self.frame_count == 1:
-                        print(f"✅✅✅ FIRST FRAME received from {self.sid[:8]}! Video is flowing!", flush=True)
-                        print(f"  Frame size: {frame.width} x {frame.height}", flush=True)
-                    elif self.frame_count % 30 == 0:
-                        print(f"📹 Frame {self.frame_count} received from {self.sid[:8]}", flush=True)
-                        
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    print(f"❌ Error reading frame: {e}", flush=True)
-                    await asyncio.sleep(0.1)
-                    
-        except Exception as e:
-            print(f"❌ Frame reader stopped: {e}", flush=True)
-    
+        print(f"🎥 VideoTransformTrack created for client {sid[:8]}", flush=True)
+
     async def recv(self):
-        """Return the next video frame to send back to the client"""
+        """Receive, process, and return the video frame"""
         try:
-            if self.last_frame is not None:
-                # Process the frame with gesture detection before sending back
-                global current_mode
-                
-                # Convert to numpy array for OpenCV
-                img = self.last_frame.to_ndarray(format="bgr24")
-                
-                # Process based on mode
+            # 1. Get the original frame from the user's camera
+            frame = await self.track.recv()
+            self.processed_count += 1
+            self.skip_counter += 1
+            frame_counts[self.sid] = self.processed_count
+
+            # 2. Convert to numpy array (OpenCV format - BGR)
+            img = frame.to_ndarray(format="bgr24")
+            
+            # Store original dimensions for later
+            original_h, original_w = img.shape[:2]
+            
+            # 3. Resize for faster processing (320x240 is plenty for gesture detection)
+            img_small = cv2.resize(img, (self.target_width, self.target_height))
+
+            # 4. Run the detectors based on current mode (skip frames to reduce CPU)
+            global current_mode
+            events = []
+            processed_img_small = img_small
+
+            # Process only every Nth frame
+            if self.skip_counter % self.skip_every == 0:
                 if current_mode == "gesture" and gesture_detector and gesture_detector.available:
-                    processed_img, events = gesture_detector.process(img)
-                    if events:
-                        socketio.emit('detection_results', events, room=self.sid)
+                    processed_img_small, events = gesture_detector.process(img_small)
                 elif current_mode == "motion" and motion_detector:
-                    processed_img, events = motion_detector.process(img)
-                    if events:
-                        socketio.emit('detection_results', events, room=self.sid)
-                else:
-                    processed_img = img
-                
-                # Convert back to AV frame
-                new_frame = av.VideoFrame.from_ndarray(processed_img, format="bgr24")
-                new_frame.pts = self.last_frame.pts
-                new_frame.time_base = self.last_frame.time_base
-                return new_frame
-            else:
-                # Return a blank frame with a message
-                blank = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(blank, "Waiting for video...", (50, 240), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                
-                frame = av.VideoFrame.from_ndarray(blank, format="bgr24")
-                frame.pts = 0
-                frame.time_base = 1/30
-                return frame
-                
+                    processed_img_small, events = motion_detector.process(img_small)
+
+            # 5. Send events to client via Socket.IO (only if there are events)
+            if events:
+                socketio.emit('detection_results', events, room=self.sid)
+
+            # 6. Resize back to original size for display
+            processed_img = cv2.resize(processed_img_small, (original_w, original_h))
+
+            # 7. Convert BGR to RGB for browser
+            rgb_img = cv2.cvtColor(processed_img, cv2.COLOR_BGR2RGB)
+
+            # 8. Rebuild the AV frame to send back to the browser
+            new_frame = av.VideoFrame.from_ndarray(rgb_img, format="rgb24")
+            new_frame.pts = frame.pts
+            new_frame.time_base = frame.time_base
+            
+            return new_frame
+
         except Exception as e:
             print(f"❌ Error in recv: {e}", flush=True)
-            raise
+            try:
+                return await self.track.recv()
+            except:
+                blank = np.zeros((480, 640, 3), dtype=np.uint8)
+                new_frame = av.VideoFrame.from_ndarray(blank, format="rgb24")
+                new_frame.pts = 0
+                new_frame.time_base = Fraction(1, 30)
+                return new_frame
 
 @app.route('/')
 def index():
@@ -190,7 +175,7 @@ def serve_static(path):
 
 @app.route('/health')
 def health():
-    return jsonify({"ok": True, "status": "healthy"})
+    return jsonify({"ok": True, "status": "healthy", "mode": current_mode})
 
 @app.route('/api/clear_canvas', methods=['POST'])
 def clear_canvas():
@@ -216,15 +201,13 @@ def set_mode():
 
 @socketio.on('connect')
 def handle_connect():
-    print(f"✅ Client connected: {request.sid}", flush=True)
+    print(f"✅ Client connected: {request.sid[:8]}", flush=True)
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print(f"❌ Client disconnected: {request.sid}", flush=True)
-    # Clean up frame count
+    print(f"❌ Client disconnected: {request.sid[:8]}", flush=True)
     if request.sid in frame_counts:
         del frame_counts[request.sid]
-    # Clean up peer connection
     for pc in list(pcs):
         if hasattr(pc, 'sid') and pc.sid == request.sid:
             pcs.discard(pc)
@@ -233,43 +216,33 @@ def handle_disconnect():
 def handle_offer(data):
     """Handle WebRTC offer"""
     sid = request.sid
-    print(f"📞 Received offer from {sid}", flush=True)
+    print(f"📞 Received offer from {sid[:8]}", flush=True)
 
     async def _handle_offer():
         try:
             offer = RTCSessionDescription(sdp=data['sdp'], type=data['type'])
             
-            # Create peer connection with STUN servers
             pc = RTCPeerConnection(configuration=RTCConfiguration(
                 iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")]
             ))
-            pc.sid = sid  # Store sid for cleanup
+            pc.sid = sid
             pcs.add(pc)
             
             @pc.on('connectionstatechange')
             async def on_connectionstatechange():
-                print(f"🔌 Connection state for {sid}: {pc.connectionState}", flush=True)
                 if pc.connectionState == "failed" or pc.connectionState == "closed":
                     if pc in pcs:
                         pcs.discard(pc)
             
-            @pc.on('iceconnectionstatechange')
-            async def on_iceconnectionstatechange():
-                print(f"❄️ ICE connection state for {sid}: {pc.iceConnectionState}", flush=True)
-            
             @pc.on('track')
             def on_track(track):
                 if track.kind == 'video':
-                    print(f"🎬 Video track received from {sid}", flush=True)
-                    print(f"  Track settings: {track.kind}", flush=True)
-                    # Create processing track
+                    print(f"🎬 Video track received from {sid[:8]}", flush=True)
                     processed_track = VideoTransformTrack(track, sid)
                     pc.addTrack(processed_track)
-                    print(f"  ✅ Added VideoTransformTrack for {sid}", flush=True)
                     
                     @track.on('ended')
                     async def on_ended():
-                        print(f"⛔ Track ended for {sid}", flush=True)
                         await processed_track.stop()
             
             @pc.on('icecandidate')
@@ -290,29 +263,23 @@ def handle_offer(data):
                 'type': pc.localDescription.type
             }, room=sid)
             
-            print(f"✅ Answer sent to {sid}", flush=True)
+            print(f"✅ Answer sent to {sid[:8]}", flush=True)
             
         except Exception as e:
             print(f"❌ Error handling offer: {e}", flush=True)
-            traceback.print_exc()
 
-    # Schedule this on the persistent RTC loop
     if rtc_loop:
         asyncio.run_coroutine_threadsafe(_handle_offer(), rtc_loop)
-    else:
-        print("❌ RTC loop not available!", flush=True)
 
 @socketio.on('ice-candidate')
 def handle_ice_candidate(data):
     """Handle ICE candidates"""
     sid = request.sid
-    print(f"📨 Received ICE candidate from {sid}", flush=True)
 
     async def _add_candidate():
         for pc in pcs:
             if hasattr(pc, 'sid') and pc.sid == sid:
                 try:
-                    # Parse the candidate string
                     parts = data['candidate'].split()
                     
                     if len(parts) >= 8 and parts[0].startswith('candidate:'):
@@ -324,7 +291,6 @@ def handle_ice_candidate(data):
                         port = int(parts[5])
                         cand_type = parts[7]
                         
-                        # Create candidate
                         candidate = RTCIceCandidate(
                             component=component,
                             foundation=foundation,
@@ -338,10 +304,6 @@ def handle_ice_candidate(data):
                         )
                         
                         await pc.addIceCandidate(candidate)
-                        print(f"✅ Added ICE candidate for {sid}", flush=True)
-                    else:
-                        print(f"⚠️ Unexpected candidate format", flush=True)
-                        
                 except Exception as e:
                     print(f"❌ Error adding ICE candidate: {e}", flush=True)
 
@@ -355,7 +317,6 @@ def handle_mode_change(data):
     mode = data.get('mode')
     if mode in ['gesture', 'motion']:
         current_mode = mode
-        print(f"🔄 Mode changed to: {mode} by {request.sid}", flush=True)
         socketio.emit('mode_changed', {'mode': mode}, room=request.sid)
 
 @socketio.on('clear_canvas')
@@ -364,7 +325,6 @@ def handle_clear_canvas():
     if gesture_detector and gesture_detector.available:
         gesture_detector.clear()
         socketio.emit('canvas_cleared', room=request.sid)
-        print(f"🧹 Canvas cleared for {request.sid}", flush=True)
 
 print("✅ All routes registered", flush=True)
 print(f"🚀 Server will start on port: {CFG.port}", flush=True)
@@ -372,4 +332,5 @@ print("=" * 50, flush=True)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", CFG.port))
+    print(f"🎯 Starting server on port {port}...", flush=True)
     socketio.run(app, host='0.0.0.0', port=port, debug=True)
