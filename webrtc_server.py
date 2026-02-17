@@ -330,9 +330,11 @@ print("✅ All routes registered", flush=True)
 print(f"🚀 Server will start on port: {CFG.port}", flush=True)
 print("=" * 50, flush=True)
 
+# webrtc_server.py (near the bottom)
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", CFG.port))
     print(f"🎯 Starting server on port {port}...", flush=True)
     
-    # Use eventlet for production (better performance)
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    # Change this line:
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
