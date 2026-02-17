@@ -3,7 +3,7 @@ services:
     name: air-motion-canvas
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 180 --log-level debug
+    startCommand: python webrtc_server.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10

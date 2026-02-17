@@ -18,8 +18,10 @@ class Config:
     max_events_in_memory: int = 200
 
     # --- Server ---
-    # Use environment variable PORT for Render, fallback to 5050 for local
     host: str = "0.0.0.0"
     port: int = int(os.environ.get("PORT", 5050))
+    
+    # --- Render Detection ---
+    IS_RENDER: bool = os.environ.get('RENDER', False)
 
 CFG = Config()

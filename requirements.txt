@@ -1,6 +1,16 @@
-flask
+flask==3.1.2
 flask-cors==4.0.0
+flask-socketio==5.3.6
+python-socketio==5.11.4
+eventlet==0.33.3
 numpy==1.26.4
 opencv-contrib-python==4.11.0.86
 mediapipe==0.10.21
 gunicorn
+aiortc==1.9.0
+av==12.3.0
+aioice==0.9.0
+cffi==1.17.1
+pyee==11.1.1
+pylibsrtp==0.10.0
+cryptography==43.0.3

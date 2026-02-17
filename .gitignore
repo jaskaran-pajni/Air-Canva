@@ -1,15 +1,24 @@
-# Python
-.venv/
+﻿# Virtual Environment
 venv/
+venv312/
+.env/
+env/
+ENV/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.dll
+*.so
+*.dylib
 
-# macOS
-.DS_Store
-
-# Logs / runtime outputs
+# Logs
 logs/
 snapshots/
+*.log
+*.jsonl
 
-# Optional
-.env
+# IDE
+.vscode/
+.idea/
